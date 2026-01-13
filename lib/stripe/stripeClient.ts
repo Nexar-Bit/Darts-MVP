@@ -1,19 +1,32 @@
 import Stripe from 'stripe';
 
-const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+let stripeInstance: Stripe | null = null;
 
-if (!stripeSecretKey) {
-  throw new Error('STRIPE_SECRET_KEY is not set in environment variables');
+/**
+ * Get Stripe secret key from environment variables
+ */
+function getStripeSecretKey(): string {
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecretKey) {
+    throw new Error('STRIPE_SECRET_KEY is not set in environment variables');
+  }
+  return stripeSecretKey;
 }
 
 /**
  * Stripe client instance for server-side use
  * Only use this in API routes and server components
+ * Initialized lazily to avoid build-time errors
  */
-export const stripe = new Stripe(stripeSecretKey, {
-  apiVersion: '2025-02-24.acacia',
-  typescript: true,
-});
+export function getStripe(): Stripe {
+  if (!stripeInstance) {
+    stripeInstance = new Stripe(getStripeSecretKey(), {
+      apiVersion: '2025-02-24.acacia',
+      typescript: true,
+    });
+  }
+  return stripeInstance;
+}
 
 /**
  * Get Stripe publishable key (safe for client-side)

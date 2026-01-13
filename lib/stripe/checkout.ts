@@ -1,4 +1,4 @@
-import { stripe } from './stripeClient';
+import { getStripe } from './stripeClient';
 import type { Stripe } from 'stripe';
 
 export interface CreateCheckoutSessionParams {
@@ -28,7 +28,7 @@ export async function createCheckoutSession({
   error?: string;
 }> {
   try {
-    const session = await stripe.checkout.sessions.create({
+    const session = await getStripe().checkout.sessions.create({
       customer_email: userEmail,
       line_items: [
         {
@@ -78,7 +78,7 @@ export async function getCheckoutSession(sessionId: string): Promise<{
   error?: string;
 }> {
   try {
-    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    const session = await getStripe().checkout.sessions.retrieve(sessionId);
     return { session };
   } catch (error) {
     console.error('Error retrieving checkout session:', error);

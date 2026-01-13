@@ -1,4 +1,4 @@
-import { stripe } from './stripeClient';
+import { getStripe } from './stripeClient';
 import { updateStripeSubscription, updateStripeCustomerId } from '@/lib/supabase/databaseServer';
 import type { Stripe } from 'stripe';
 
@@ -20,7 +20,7 @@ export async function constructWebhookEvent(
   }
 
   try {
-    const event = stripe.webhooks.constructEvent(payload, signature, webhookSecret);
+    const event = getStripe().webhooks.constructEvent(payload, signature, webhookSecret);
     return event;
   } catch (error) {
     console.error('Webhook signature verification failed:', error);
@@ -107,7 +107,7 @@ async function handleInvoicePaymentSucceeded(
   }
 
   // Retrieve the subscription to get userId
-  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+  const subscription = await getStripe().subscriptions.retrieve(subscriptionId);
   const userId = subscription.metadata?.userId;
   
   if (!userId) {
@@ -134,7 +134,7 @@ async function handleInvoicePaymentFailed(
   }
 
   // Retrieve the subscription to get userId
-  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+  const subscription = await getStripe().subscriptions.retrieve(subscriptionId);
   const userId = subscription.metadata?.userId;
   
   if (!userId) {
@@ -144,7 +144,7 @@ async function handleInvoicePaymentFailed(
 
   // Mark subscription as unpaid if payment failed
   // You might want to handle this differently based on your business logic
-  const subscriptionStatus = await stripe.subscriptions.retrieve(subscriptionId);
+  const subscriptionStatus = await getStripe().subscriptions.retrieve(subscriptionId);
   const isPaid = subscriptionStatus.status === 'active' || subscriptionStatus.status === 'trialing';
   
   await updateStripeSubscription(userId, subscriptionId, isPaid);
@@ -192,3 +192,4 @@ export async function handleWebhookEvent(event: Stripe.Event): Promise<{
     };
   }
 }
+

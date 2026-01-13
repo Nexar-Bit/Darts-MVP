@@ -1,4 +1,4 @@
-import { stripe } from './stripeClient';
+import { getStripe } from './stripeClient';
 
 export interface CreatePortalSessionParams {
   customerId: string;
@@ -17,7 +17,7 @@ export async function createPortalSession({
   error?: string;
 }> {
   try {
-    const session = await stripe.billingPortal.sessions.create({
+    const session = await getStripe().billingPortal.sessions.create({
       customer: customerId,
       return_url: returnUrl,
     });
@@ -39,7 +39,7 @@ export async function createPortalSession({
  */
 export async function getCustomer(customerId: string) {
   try {
-    const customer = await stripe.customers.retrieve(customerId);
+    const customer = await getStripe().customers.retrieve(customerId);
     return { customer, error: null };
   } catch (error) {
     console.error('Error retrieving customer:', error);
@@ -66,7 +66,7 @@ export async function createCustomer({
   error?: string;
 }> {
   try {
-    const customer = await stripe.customers.create({
+    const customer = await getStripe().customers.create({
       email,
       metadata: {
         userId,
