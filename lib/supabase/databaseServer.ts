@@ -7,6 +7,11 @@ export interface UserProfile {
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
   updated_at: string;
+  analysis_count?: number;
+  analysis_limit?: number;
+  last_analysis_reset?: string | null;
+  plan_type?: 'free' | 'starter' | 'monthly';
+  plan_purchased_at?: string | null;
 }
 
 /**

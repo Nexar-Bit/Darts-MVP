@@ -140,11 +140,17 @@ export default function BillingPage() {
                 <span
                   className={`px-3 py-1 rounded-full text-sm font-medium ${
                     profile?.is_paid
-                      ? 'bg-green-100 text-green-800'
+                      ? profile?.plan_type === 'monthly'
+                        ? 'bg-blue-100 text-blue-800'
+                        : 'bg-purple-100 text-purple-800'
                       : 'bg-gray-100 text-gray-800'
                   }`}
                 >
-                  {profile?.is_paid ? 'Pro' : 'Free'}
+                  {profile?.plan_type === 'monthly'
+                    ? 'Monthly Plan'
+                    : profile?.plan_type === 'starter'
+                    ? 'Starter Plan'
+                    : 'No Plan'}
                 </span>
               </div>
 
@@ -154,6 +160,17 @@ export default function BillingPage() {
                   {profile?.is_paid ? 'Active' : 'Inactive'}
                 </span>
               </div>
+
+              {profile?.plan_type && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-gray-700">Analyses Remaining</span>
+                  <span className="text-sm text-gray-900 font-medium">
+                    {profile.analysis_limit && profile.analysis_count !== undefined
+                      ? `${profile.analysis_limit - profile.analysis_count} / ${profile.analysis_limit}`
+                      : 'N/A'}
+                  </span>
+                </div>
+              )}
 
               {profile?.stripe_customer_id && (
                 <div className="flex items-center justify-between">
@@ -206,12 +223,12 @@ export default function BillingPage() {
           ) : (
             <Card className="border-blue-200 bg-blue-50">
               <CardHeader>
-                <CardTitle>Upgrade to Pro</CardTitle>
-                <CardDescription>Get access to all premium features</CardDescription>
+                <CardTitle>Choose a Plan</CardTitle>
+                <CardDescription>Select a plan to start analyzing your throws</CardDescription>
               </CardHeader>
               <CardContent>
                 <p className="text-gray-700 mb-4">
-                  You&apos;re currently on the free plan. Upgrade to unlock all features.
+                  You don&apos;t have an active plan. Choose between our Starter Plan (3 analyses) or Monthly Plan (12 analyses per month).
                 </p>
                 <a href="/pricing">
                   <Button variant="primary" size="lg">

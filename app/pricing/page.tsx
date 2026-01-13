@@ -1,90 +1,124 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Check } from 'lucide-react';
+import { Check, Loader2 } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/Card';
+import { createSupabaseClient } from '@/lib/supabase/supabaseClient';
 
 interface PricingPlan {
   name: string;
-  price: {
-    monthly: string;
-    yearly: string;
-  };
+  price: string;
+  priceType: 'one-time' | 'monthly';
   description: string;
   features: string[];
   cta: string;
   popular?: boolean;
+  priceId?: string; // Stripe Price ID - you'll need to add these
 }
 
 export default function PricingPage() {
-  const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
+  const router = useRouter();
+  const [loading, setLoading] = useState<string | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      const supabase = createSupabaseClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      setIsAuthenticated(!!session);
+    };
+    checkAuth();
+  }, []);
 
   const plans: PricingPlan[] = [
     {
-      name: 'Free',
-      price: {
-        monthly: '$0',
-        yearly: '$0',
-      },
-      description: 'Perfect for getting started',
+      name: 'Starter Plan',
+      price: '£20',
+      priceType: 'one-time',
+      description: 'Perfect for trying out our analysis',
       features: [
-        'Basic features',
-        'Up to 10 projects',
-        'Community support',
-        '1GB storage',
+        '3x throw analysis',
+        '1 week training plan',
+        'Detailed feedback report',
+        'Email support',
       ],
       cta: 'Get Started',
+      priceId: process.env.NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID || 'price_starter', // Set in .env.local
     },
     {
-      name: 'Pro',
-      price: {
-        monthly: '$29',
-        yearly: '$290',
-      },
-      description: 'For growing businesses',
+      name: 'Monthly Plan',
+      price: '£60',
+      priceType: 'monthly',
+      description: 'Best value for regular practice',
       features: [
-        'All free features',
-        'Unlimited projects',
-        'Priority support',
-        '100GB storage',
-        'Advanced analytics',
-        'Custom integrations',
+        '12x throw analysis per month',
+        '4 week training plan',
+        'Detailed feedback reports',
+        'Progress tracking',
+        'Priority email support',
+        'Cancel anytime',
       ],
-      cta: 'Start Free Trial',
+      cta: 'Subscribe Now',
       popular: true,
-    },
-    {
-      name: 'Enterprise',
-      price: {
-        monthly: '$99',
-        yearly: '$990',
-      },
-      description: 'For large organizations',
-      features: [
-        'All pro features',
-        'Unlimited everything',
-        '24/7 dedicated support',
-        'Unlimited storage',
-        'Custom SLA',
-        'On-premise deployment',
-        'Advanced security',
-      ],
-      cta: 'Contact Sales',
+      priceId: process.env.NEXT_PUBLIC_STRIPE_MONTHLY_PRICE_ID || 'price_monthly', // Set in .env.local
     },
   ];
 
-  const getPrice = (plan: PricingPlan) => {
-    return billingCycle === 'monthly' ? plan.price.monthly : plan.price.yearly;
-  };
+  const handleCheckout = async (plan: PricingPlan) => {
+    // Check if user is authenticated
+    if (!isAuthenticated) {
+      router.push('/signup?redirect=/pricing');
+      return;
+    }
 
-  const getYearlySavings = (plan: PricingPlan) => {
-    if (plan.price.monthly === '$0') return null;
-    const monthlyNum = parseInt(plan.price.monthly.replace('$', ''));
-    const yearlyNum = parseInt(plan.price.yearly.replace('$', ''));
-    const savings = monthlyNum * 12 - yearlyNum;
-    return savings > 0 ? savings : null;
+    setLoading(plan.priceId || '');
+
+    try {
+      const supabase = createSupabaseClient();
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (!session) {
+        router.push('/login?redirect=/pricing');
+        return;
+      }
+
+      // Determine checkout mode
+      const mode = plan.priceType === 'one-time' ? 'payment' : 'subscription';
+
+      // Create checkout session
+      const response = await fetch('/api/create-checkout-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          priceId: plan.priceId,
+          mode,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to create checkout session');
+      }
+
+      const { url } = await response.json();
+
+      if (url) {
+        // Redirect to Stripe Checkout
+        window.location.href = url;
+      } else {
+        throw new Error('No checkout URL returned');
+      }
+    } catch (error) {
+      console.error('Checkout error:', error);
+      alert(error instanceof Error ? error.message : 'Failed to start checkout. Please try again.');
+      setLoading(null);
+    }
   };
 
   return (
@@ -95,94 +129,74 @@ export default function PricingPage() {
           <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
             Simple, Transparent Pricing
           </h1>
-          <p className="text-xl text-gray-600 max-w-2xl mx-auto mb-8">
-            Choose the perfect plan for your needs. All plans include a 14-day free trial.
+          <p className="text-xl text-gray-600 max-w-2xl mx-auto">
+            Choose the plan that works best for your training needs
           </p>
-
-          {/* Billing Toggle */}
-          <div className="flex items-center justify-center gap-4">
-            <span className={`text-sm font-medium ${billingCycle === 'monthly' ? 'text-gray-900' : 'text-gray-500'}`}>
-              Monthly
-            </span>
-            <button
-              onClick={() => setBillingCycle(billingCycle === 'monthly' ? 'yearly' : 'monthly')}
-              className="relative inline-flex h-6 w-11 items-center rounded-full bg-blue-600 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-            >
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                  billingCycle === 'yearly' ? 'translate-x-6' : 'translate-x-1'
-                }`}
-              />
-            </button>
-            <span className={`text-sm font-medium ${billingCycle === 'yearly' ? 'text-gray-900' : 'text-gray-500'}`}>
-              Yearly
-            </span>
-            {billingCycle === 'yearly' && (
-              <span className="ml-2 text-sm text-green-600 font-medium">
-                Save up to 17%
-              </span>
-            )}
-          </div>
         </div>
 
         {/* Pricing Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto">
-          {plans.map((plan, index) => {
-            const savings = getYearlySavings(plan);
-            return (
-              <Card
-                key={index}
-                variant={plan.popular ? 'pricing' : 'default'}
-                className={plan.popular ? 'border-blue-500 relative' : ''}
-              >
-                {plan.popular && (
-                  <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
-                    <span className="bg-blue-600 text-white text-xs font-semibold px-4 py-1 rounded-full">
-                      Most Popular
-                    </span>
-                  </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+          {plans.map((plan, index) => (
+            <Card
+              key={index}
+              variant={plan.popular ? 'pricing' : 'default'}
+              className={plan.popular ? 'border-blue-500 relative' : ''}
+            >
+              {plan.popular && (
+                <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
+                  <span className="bg-blue-600 text-white text-xs font-semibold px-4 py-1 rounded-full">
+                    Most Popular
+                  </span>
+                </div>
+              )}
+              <CardHeader>
+                <CardTitle className="text-2xl">{plan.name}</CardTitle>
+                <CardDescription>{plan.description}</CardDescription>
+                <div className="mt-4">
+                  <span className="text-4xl font-bold text-gray-900">
+                    {plan.price}
+                  </span>
+                  <span className="text-gray-600 ml-2">
+                    {plan.priceType === 'one-time' ? 'one-time' : '/month'}
+                  </span>
+                </div>
+                {plan.priceType === 'monthly' && (
+                  <p className="text-sm text-gray-500 mt-2">
+                    Billed monthly • Cancel anytime
+                  </p>
                 )}
-                <CardHeader>
-                  <CardTitle className="text-2xl">{plan.name}</CardTitle>
-                  <CardDescription>{plan.description}</CardDescription>
-                  <div className="mt-4">
-                    <span className="text-4xl font-bold text-gray-900">
-                      {getPrice(plan)}
-                    </span>
-                    <span className="text-gray-600 ml-2">
-                      /{billingCycle === 'monthly' ? 'month' : 'year'}
-                    </span>
-                  </div>
-                  {savings && billingCycle === 'yearly' && (
-                    <p className="text-sm text-green-600 mt-2">
-                      Save ${savings} per year
-                    </p>
+              </CardHeader>
+              <CardContent>
+                <ul className="space-y-3">
+                  {plan.features.map((feature, featureIndex) => (
+                    <li key={featureIndex} className="flex items-start">
+                      <Check className="h-5 w-5 text-green-600 mr-3 flex-shrink-0 mt-0.5" />
+                      <span className="text-gray-700">{feature}</span>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+              <CardFooter>
+                <Button
+                  variant={plan.popular ? 'primary' : 'outline'}
+                  size="lg"
+                  className="w-full"
+                  onClick={() => handleCheckout(plan)}
+                  isLoading={loading === plan.priceId}
+                  disabled={loading !== null}
+                >
+                  {loading === plan.priceId ? (
+                    <>
+                      <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    plan.cta
                   )}
-                </CardHeader>
-                <CardContent>
-                  <ul className="space-y-3">
-                    {plan.features.map((feature, featureIndex) => (
-                      <li key={featureIndex} className="flex items-start">
-                        <Check className="h-5 w-5 text-green-600 mr-3 flex-shrink-0 mt-0.5" />
-                        <span className="text-gray-700">{feature}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </CardContent>
-                <CardFooter>
-                  <Link href="/signup" className="w-full">
-                    <Button
-                      variant={plan.popular ? 'primary' : 'outline'}
-                      size="lg"
-                      className="w-full"
-                    >
-                      {plan.cta}
-                    </Button>
-                  </Link>
-                </CardFooter>
-              </Card>
-            );
-          })}
+                </Button>
+              </CardFooter>
+            </Card>
+          ))}
         </div>
 
         {/* FAQ Link */}

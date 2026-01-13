@@ -160,11 +160,17 @@ export default function ProfilePage() {
                       <span
                         className={`px-3 py-1 rounded-full text-sm font-medium ${
                           profile?.is_paid
-                            ? 'bg-green-100 text-green-800'
+                            ? profile?.plan_type === 'monthly'
+                              ? 'bg-blue-100 text-blue-800'
+                              : 'bg-purple-100 text-purple-800'
                             : 'bg-gray-100 text-gray-800'
                         }`}
                       >
-                        {profile?.is_paid ? 'Pro Account' : 'Free Account'}
+                        {profile?.plan_type === 'monthly'
+                          ? 'Monthly Plan'
+                          : profile?.plan_type === 'starter'
+                          ? 'Starter Plan'
+                          : 'No Plan'}
                       </span>
                     </div>
                   </div>
@@ -195,7 +201,11 @@ export default function ProfilePage() {
                 <div className="flex items-center justify-between py-2 border-b border-gray-200">
                   <span className="text-sm font-medium text-gray-700">Account Type</span>
                   <span className="text-sm text-gray-900">
-                    {profile?.is_paid ? 'Pro' : 'Free'}
+                    {profile?.plan_type === 'monthly'
+                      ? 'Monthly Plan'
+                      : profile?.plan_type === 'starter'
+                      ? 'Starter Plan'
+                      : 'No Plan'}
                   </span>
                 </div>
 
@@ -253,9 +263,9 @@ export default function ProfilePage() {
               {!profile?.is_paid && (
                 <div className="flex items-center justify-between py-2">
                   <div>
-                    <p className="text-sm font-medium text-gray-900">Upgrade to Pro</p>
+                    <p className="text-sm font-medium text-gray-900">Choose a Plan</p>
                     <p className="text-sm text-gray-600">
-                      Unlock all features with a Pro subscription
+                      Select a plan to start analyzing your throws
                     </p>
                   </div>
                   <a href="/pricing">

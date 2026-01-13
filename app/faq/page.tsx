@@ -8,7 +8,7 @@ export default function FAQPage() {
     },
     {
       question: 'How do I get started?',
-      answer: 'Getting started is easy! Simply sign up for a free account, choose a plan that fits your needs, and start using our platform. We offer a 14-day free trial on all paid plans, so you can try everything risk-free.',
+      answer: 'Getting started is easy! Simply sign up for an account, choose a plan that fits your needs, and start analyzing your throws. You can choose between our Starter Plan (3x throw analysis) or Monthly Plan (12x throw analysis per month).',
     },
     {
       question: 'What payment methods do you accept?',
@@ -16,7 +16,7 @@ export default function FAQPage() {
     },
     {
       question: 'Can I change my plan later?',
-      answer: 'Yes, absolutely! You can upgrade or downgrade your plan at any time from your account settings. Changes will be reflected in your next billing cycle, and we\'ll prorate any differences.',
+      answer: 'Yes! If you\'re on the Starter Plan, you can upgrade to the Monthly Plan at any time. Monthly subscribers can cancel anytime, and your subscription will remain active until the end of your current billing period.',
     },
     {
       question: 'Do you offer refunds?',
@@ -35,8 +35,8 @@ export default function FAQPage() {
       answer: 'Yes, you can cancel your subscription at any time from your account settings. Your subscription will remain active until the end of your current billing period, and you won\'t be charged again.',
     },
     {
-      question: 'Do you offer discounts for annual plans?',
-      answer: 'Yes! We offer a 17% discount when you choose annual billing instead of monthly billing. This is applied automatically when you select the yearly option.',
+      question: 'What\'s the difference between the Starter and Monthly plans?',
+      answer: 'The Starter Plan (£20 one-time) includes 3 throw analyses with a 1-week training plan - perfect for trying out our service. The Monthly Plan (£60/month) includes 12 throw analyses per month with a 4-week training plan, plus progress tracking and priority support - ideal for regular practice.',
     },
     {
       question: 'How do I contact support?',

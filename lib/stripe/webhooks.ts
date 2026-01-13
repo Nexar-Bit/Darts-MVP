@@ -1,5 +1,6 @@
 import { getStripe } from './stripeClient';
 import { updateStripeSubscription, updateStripeCustomerId } from '@/lib/supabase/databaseServer';
+import { createSupabaseServerClient } from '@/lib/supabase/supabaseServer';
 import type { Stripe } from 'stripe';
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -47,12 +48,23 @@ async function handleSubscriptionCreated(
   // Update customer ID if not already set
   await updateStripeCustomerId(userId, customerId);
 
-  // Update subscription
-  await updateStripeSubscription(
-    userId,
-    subscription.id,
-    subscription.status === 'active' || subscription.status === 'trialing'
-  );
+  const isPaid = subscription.status === 'active' || subscription.status === 'trialing';
+  
+  // Update subscription with plan type and limits
+  const supabase = createSupabaseServerClient();
+  await supabase
+    .from('profiles')
+    .update({
+      stripe_subscription_id: subscription.id,
+      is_paid: isPaid,
+      plan_type: 'monthly',
+      analysis_limit: 12,
+      analysis_count: 0,
+      last_analysis_reset: new Date().toISOString(),
+      plan_purchased_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', userId);
 }
 
 /**
@@ -151,6 +163,46 @@ async function handleInvoicePaymentFailed(
 }
 
 /**
+ * Handles checkout session completed (for one-time payments)
+ */
+async function handleCheckoutSessionCompleted(
+  session: Stripe.Checkout.Session
+): Promise<void> {
+  const userId = session.metadata?.userId;
+  if (!userId) {
+    console.error('No userId in checkout session metadata');
+    return;
+  }
+
+  const customerId = typeof session.customer === 'string'
+    ? session.customer
+    : session.customer?.id;
+
+  if (customerId) {
+    await updateStripeCustomerId(userId, customerId);
+  }
+
+  // Check if this is a one-time payment (Starter Plan)
+  // You can identify this by checking the price ID or mode
+  const mode = session.mode;
+  if (mode === 'payment') {
+    // One-time payment - Starter Plan
+    const supabase = createSupabaseServerClient();
+    await supabase
+      .from('profiles')
+      .update({
+        is_paid: true,
+        plan_type: 'starter',
+        analysis_limit: 3,
+        analysis_count: 0,
+        plan_purchased_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
+  }
+}
+
+/**
  * Main webhook event handler
  */
 export async function handleWebhookEvent(event: Stripe.Event): Promise<{
@@ -159,6 +211,10 @@ export async function handleWebhookEvent(event: Stripe.Event): Promise<{
 }> {
   try {
     switch (event.type) {
+      case 'checkout.session.completed':
+        await handleCheckoutSessionCompleted(event.data.object as Stripe.Checkout.Session);
+        break;
+
       case 'customer.subscription.created':
         await handleSubscriptionCreated(event.data.object as Stripe.Subscription);
         break;
