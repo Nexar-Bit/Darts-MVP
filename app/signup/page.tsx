@@ -7,9 +7,11 @@ import { signUp } from '@/lib/supabase/auth';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
+import { useToast, ToastContainer } from '@/components/ui/Toast';
 
 export default function SignupPage() {
   const router = useRouter();
+  const toast = useToast();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -27,22 +29,39 @@ export default function SignupPage() {
 
     if (!email.trim()) {
       newErrors.email = 'Email is required';
+      toast.error('Email is required');
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       newErrors.email = 'Please enter a valid email address';
+      toast.error('Please enter a valid email address');
     }
 
     if (!password) {
       newErrors.password = 'Password is required';
+      if (!newErrors.email) {
+        toast.error('Password is required');
+      }
     } else if (password.length < 6) {
       newErrors.password = 'Password must be at least 6 characters';
+      if (!newErrors.email) {
+        toast.error('Password must be at least 6 characters');
+      }
     } else if (!/(?=.*[a-z])(?=.*[A-Z])/.test(password)) {
       newErrors.password = 'Password must contain both uppercase and lowercase letters';
+      if (!newErrors.email) {
+        toast.error('Password must contain both uppercase and lowercase letters');
+      }
     }
 
     if (!confirmPassword) {
       newErrors.confirmPassword = 'Please confirm your password';
+      if (!newErrors.email && !newErrors.password) {
+        toast.error('Please confirm your password');
+      }
     } else if (password !== confirmPassword) {
       newErrors.confirmPassword = 'Passwords do not match';
+      if (!newErrors.email && !newErrors.password) {
+        toast.error('Passwords do not match');
+      }
     }
 
     setErrors(newErrors);
@@ -59,6 +78,7 @@ export default function SignupPage() {
     setIsLoading(true);
     setErrors({});
     setSuccess(false);
+    toast.info('Creating your account...', 2000);
 
     try {
       const { user, session, error } = await signUp({
@@ -70,12 +90,18 @@ export default function SignupPage() {
         // Handle specific Supabase errors
         let errorMessage = 'An error occurred. Please try again.';
         
-        if (error.message.includes('User already registered')) {
+        if (error.message.includes('User already registered') || error.message.includes('already registered')) {
           errorMessage = 'An account with this email already exists. Please sign in instead.';
+          toast.error('An account with this email already exists. Please sign in instead.');
         } else if (error.message.includes('Password')) {
           errorMessage = error.message;
+          toast.error(error.message);
+        } else if (error.message.includes('email')) {
+          errorMessage = error.message;
+          toast.error(error.message);
         } else {
           errorMessage = error.message || errorMessage;
+          toast.error(error.message || errorMessage);
         }
 
         setErrors({
@@ -87,24 +113,26 @@ export default function SignupPage() {
 
       if (user) {
         setSuccess(true);
-        // Note: Supabase may require email confirmation
-        // If email confirmation is disabled, you can redirect immediately
-        // If email confirmation is enabled, show a message instead
-        setTimeout(() => {
-          if (session) {
-            // Email confirmation disabled - redirect immediately
+        
+        if (session) {
+          // Email confirmation disabled - user is immediately signed in
+          toast.success('Account created successfully! Redirecting to dashboard...', 2000);
+          setTimeout(() => {
             router.push('/dashboard');
             router.refresh();
-          } else {
-            // Email confirmation required - user needs to check their email
-            // The success message will be shown
-          }
-        }, 1500);
+          }, 1500);
+        } else {
+          // Email confirmation required
+          toast.success('Account created! Please check your email to confirm your account.', 8000);
+          toast.info('A confirmation email has been sent to ' + email, 8000);
+        }
       }
     } catch (error) {
       console.error('Signup error:', error);
+      const errorMessage = 'An unexpected error occurred. Please try again.';
+      toast.error(errorMessage);
       setErrors({
-        general: 'An unexpected error occurred. Please try again.',
+        general: errorMessage,
       });
       setIsLoading(false);
     }
@@ -112,45 +140,50 @@ export default function SignupPage() {
 
   if (success && !errors.general) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-md w-full">
-          <Card>
-            <CardContent className="pt-6">
-              <div className="text-center">
-                <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mb-4">
-                  <svg
-                    className="h-6 w-6 text-green-600"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M5 13l4 4L19 7"
-                    />
-                  </svg>
+      <>
+        <ToastContainer toasts={toast.toasts} onClose={toast.removeToast} />
+        <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+          <div className="max-w-md w-full">
+            <Card>
+              <CardContent className="pt-6">
+                <div className="text-center">
+                  <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mb-4">
+                    <svg
+                      className="h-6 w-6 text-green-600"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M5 13l4 4L19 7"
+                      />
+                    </svg>
+                  </div>
+                  <h2 className="text-2xl font-bold text-gray-900 mb-2">
+                    Account Created!
+                  </h2>
+                  <p className="text-gray-600 mb-6">
+                    Please check your email to confirm your account. Once confirmed, you can sign in.
+                  </p>
+                  <Link href="/login">
+                    <Button variant="primary">Go to Sign In</Button>
+                  </Link>
                 </div>
-                <h2 className="text-2xl font-bold text-gray-900 mb-2">
-                  Account Created!
-                </h2>
-                <p className="text-gray-600 mb-6">
-                  Please check your email to confirm your account. Once confirmed, you can sign in.
-                </p>
-                <Link href="/login">
-                  <Button variant="primary">Go to Sign In</Button>
-                </Link>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+    <>
+      <ToastContainer toasts={toast.toasts} onClose={toast.removeToast} />
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
         <Card>
           <CardHeader>
@@ -252,5 +285,6 @@ export default function SignupPage() {
         </Card>
       </div>
     </div>
+    </>
   );
 }

@@ -15,6 +15,19 @@ export interface SignInCredentials {
 }
 
 /**
+ * Gets the app URL for redirects (works in both client and server contexts)
+ */
+function getAppUrl(): string {
+  // Client-side: use window.location.origin
+  if (typeof window !== 'undefined') {
+    return window.location.origin;
+  }
+  
+  // Server-side: use environment variable or fallback
+  return process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+}
+
+/**
  * Signs up a new user with email and password
  */
 export async function signUp(credentials: SignUpCredentials): Promise<{
@@ -23,12 +36,14 @@ export async function signUp(credentials: SignUpCredentials): Promise<{
   error: AuthError | null;
 }> {
   const supabase = createSupabaseClient();
+  const appUrl = getAppUrl();
   
   const { data, error } = await supabase.auth.signUp({
     email: credentials.email,
     password: credentials.password,
     options: {
       data: credentials.metadata || {},
+      emailRedirectTo: `${appUrl}/auth/callback`,
     },
   });
 
@@ -117,9 +132,10 @@ export async function resetPassword(email: string): Promise<{
   error: AuthError | null;
 }> {
   const supabase = createSupabaseClient();
+  const appUrl = getAppUrl();
   
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/reset-password`,
+    redirectTo: `${appUrl}/auth/reset-password`,
   });
 
   return {

@@ -7,9 +7,11 @@ import { signIn } from '@/lib/supabase/auth';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
+import { useToast, ToastContainer } from '@/components/ui/Toast';
 
 export default function LoginPage() {
   const router = useRouter();
+  const toast = useToast();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errors, setErrors] = useState<{
@@ -24,14 +26,22 @@ export default function LoginPage() {
 
     if (!email.trim()) {
       newErrors.email = 'Email is required';
+      toast.error('Email is required');
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       newErrors.email = 'Please enter a valid email address';
+      toast.error('Please enter a valid email address');
     }
 
     if (!password) {
       newErrors.password = 'Password is required';
+      if (!newErrors.email) {
+        toast.error('Password is required');
+      }
     } else if (password.length < 6) {
       newErrors.password = 'Password must be at least 6 characters';
+      if (!newErrors.email) {
+        toast.error('Password must be at least 6 characters');
+      }
     }
 
     setErrors(newErrors);
@@ -47,6 +57,7 @@ export default function LoginPage() {
 
     setIsLoading(true);
     setErrors({});
+    toast.info('Signing in...', 2000);
 
     try {
       const { user, session, error } = await signIn({
@@ -55,31 +66,55 @@ export default function LoginPage() {
       });
 
       if (error) {
+        let errorMessage = 'Invalid email or password. Please try again.';
+        
+        // Handle specific error types
+        if (error.message.includes('Invalid login credentials')) {
+          errorMessage = 'Invalid email or password. Please check your credentials and try again.';
+          toast.error('Invalid email or password');
+        } else if (error.message.includes('Email not confirmed')) {
+          errorMessage = 'Please confirm your email address before signing in. Check your inbox for a confirmation link.';
+          toast.warning('Email not confirmed. Please check your inbox.');
+        } else if (error.message.includes('Too many requests')) {
+          errorMessage = 'Too many login attempts. Please wait a moment and try again.';
+          toast.error('Too many login attempts. Please wait and try again.');
+        } else {
+          errorMessage = error.message || errorMessage;
+          toast.error(error.message || errorMessage);
+        }
+
         setErrors({
-          general: error.message || 'Invalid email or password. Please try again.',
+          general: errorMessage,
         });
         setIsLoading(false);
         return;
       }
 
       if (user && session) {
-        // Redirect to dashboard on success
-        router.push('/dashboard');
-        router.refresh();
+        toast.success('Successfully signed in! Redirecting...', 2000);
+        // Small delay to show success message
+        setTimeout(() => {
+          router.push('/dashboard');
+          router.refresh();
+        }, 500);
       }
     } catch (error) {
       console.error('Login error:', error);
+      const errorMessage = 'An unexpected error occurred. Please try again.';
+      toast.error(errorMessage);
       setErrors({
-        general: 'An unexpected error occurred. Please try again.',
+        general: errorMessage,
       });
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <Card>
+    <>
+      <ToastContainer toasts={toast.toasts} onClose={toast.removeToast} />
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-md w-full space-y-8">
+          <Card>
           <CardHeader>
             <CardTitle className="text-3xl font-bold text-center">
               Sign In
@@ -161,5 +196,6 @@ export default function LoginPage() {
         </Card>
       </div>
     </div>
+    </>
   );
 }
