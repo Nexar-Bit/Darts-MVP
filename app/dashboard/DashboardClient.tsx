@@ -66,10 +66,19 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
           if (data.success && data.updated) {
             toast.success(`Successfully activated ${data.planType === 'starter' ? 'Starter' : 'Monthly'} Plan!`);
             
-            // Refresh profile
+            // Force refresh profile immediately
             const { profile: updatedProfile } = await getCurrentUserProfile();
             if (updatedProfile) {
               setProfile(updatedProfile);
+              console.log('Profile updated after purchase:', updatedProfile);
+            } else {
+              // If profile fetch fails, try again after a short delay
+              setTimeout(async () => {
+                const { profile: retryProfile } = await getCurrentUserProfile();
+                if (retryProfile) {
+                  setProfile(retryProfile);
+                }
+              }, 1000);
             }
             
             // Remove session_id from URL
@@ -83,9 +92,21 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
               const { profile: updatedProfile } = await getCurrentUserProfile();
               if (updatedProfile) {
                 setProfile(updatedProfile);
+                console.log('Profile refreshed after delay:', updatedProfile);
                 // If profile shows as paid now, show success message
                 if (updatedProfile.is_paid) {
                   toast.success(`Successfully activated ${updatedProfile.plan_type === 'starter' ? 'Starter' : 'Monthly'} Plan!`);
+                } else {
+                  // If still not paid, try one more time after another delay
+                  setTimeout(async () => {
+                    const { profile: finalProfile } = await getCurrentUserProfile();
+                    if (finalProfile) {
+                      setProfile(finalProfile);
+                      if (finalProfile.is_paid) {
+                        toast.success(`Plan activated!`);
+                      }
+                    }
+                  }, 3000);
                 }
               }
             }, 2000);
@@ -116,6 +137,7 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
         const { profile: updatedProfile } = await getCurrentUserProfile();
         if (updatedProfile) {
           setProfile(updatedProfile);
+          console.log('Profile loaded:', updatedProfile);
         }
       } catch (err) {
         console.error('Error refreshing profile:', err);
@@ -124,6 +146,27 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
 
     checkSessionId();
     refreshProfile();
+    
+    // Also refresh profile periodically if there's a session_id in URL (in case of delays)
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('session_id');
+    if (sessionId) {
+      // Refresh profile every 2 seconds for up to 10 seconds after returning from checkout
+      let attempts = 0;
+      const refreshInterval = setInterval(async () => {
+        attempts++;
+        const { profile: updatedProfile } = await getCurrentUserProfile();
+        if (updatedProfile) {
+          setProfile(updatedProfile);
+          if (updatedProfile.is_paid || attempts >= 5) {
+            clearInterval(refreshInterval);
+          }
+        }
+      }, 2000);
+      
+      // Clean up interval after 10 seconds
+      setTimeout(() => clearInterval(refreshInterval), 10000);
+    }
   }, [toast]);
 
   const handleSignOut = async () => {
@@ -301,6 +344,36 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
                 : "Ready to start analyzing your throws? Choose a plan to get started."}
             </p>
           </div>
+
+          {/* Membership Status */}
+          {profile?.is_paid ? (
+            <Card className="border-blue-200 bg-blue-50">
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="h-12 w-12 rounded-full bg-blue-600 flex items-center justify-center">
+                      <CheckCircle className="h-6 w-6 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900">
+                        {profile.plan_type === 'monthly' ? 'Monthly Plan' : 'Starter Plan'} - Active
+                      </h3>
+                      <p className="text-sm text-gray-600 mt-1">
+                        {profile.plan_type === 'monthly' 
+                          ? '12 analyses per month • Billed monthly'
+                          : '3 analyses total • One-time payment'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className="px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+                      Active
+                    </span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
 
           {/* Usage Status */}
           {profile?.is_paid && (
