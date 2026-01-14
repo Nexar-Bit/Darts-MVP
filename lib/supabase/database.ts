@@ -48,10 +48,44 @@ export async function getUserProfile(userId: string): Promise<{
     if (error) {
       console.error('Error fetching profile:', error);
       
+      // PGRST116 with "0 rows" means profile doesn't exist - try to create it
+      if (error.code === 'PGRST116' && (error.details?.includes('0 rows') || error.message?.includes('0 rows'))) {
+        console.log('Profile not found, attempting to create it...');
+        
+        // Get user email from session
+        const userEmail = session.user.email;
+        
+        // Try to create the profile
+        const { data: newProfile, error: createError } = await (supabase
+          .from('profiles') as any)
+          .insert({
+            id: userId,
+            email: userEmail || null,
+            is_paid: false,
+          })
+          .select()
+          .single();
+        
+        if (createError) {
+          console.error('Error creating profile:', createError);
+          // If creation fails (might be RLS blocking), return null gracefully
+          return {
+            profile: null,
+            error: null,
+          };
+        }
+        
+        // Return the newly created profile
+        console.log('Profile created successfully:', newProfile);
+        return {
+          profile: newProfile as UserProfile | null,
+          error: null,
+        };
+      }
+      
       // 406 errors can mean RLS blocked the query or Accept header issue
       // Check for 406 status code in message or specific error codes
-      const is406Error = error.code === 'PGRST116' || 
-                        error.message?.includes('406') || 
+      const is406Error = error.message?.includes('406') || 
                         error.message?.toLowerCase().includes('not acceptable');
       
       if (is406Error) {

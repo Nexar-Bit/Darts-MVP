@@ -181,21 +181,38 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
                 }
               }, 1000);
             } else {
-              // Other error
-              toast.error(`Payment verification failed. Please refresh the page.`);
+              // Other error - but payment might have succeeded, so check profile anyway
+              console.warn('Verification failed, but checking profile in case payment succeeded:', data.error);
               
-              // Try to refresh profile once in case webhook processed it
-              setTimeout(async () => {
+              // Try to refresh profile multiple times in case webhook processed it
+              const checkProfile = async (attempt = 1) => {
                 try {
                   const { profile: updatedProfile } = await getCurrentUserProfile();
-                  if (updatedProfile && updatedProfile.is_paid) {
+                  if (updatedProfile) {
                     setProfile(updatedProfile);
-                    toast.success(`Plan activated!`);
+                    if (updatedProfile.is_paid) {
+                      toast.success(`Plan activated!`);
+                      return; // Success, stop retrying
+                    }
+                  }
+                  
+                  // Retry up to 3 times
+                  if (attempt < 3) {
+                    setTimeout(() => checkProfile(attempt + 1), 2000);
+                  } else {
+                    // Final attempt failed - show error
+                    toast.error(`Payment verification failed. If payment succeeded, please refresh the page.`);
                   }
                 } catch (err) {
                   console.error('Error refreshing profile:', err);
+                  if (attempt < 3) {
+                    setTimeout(() => checkProfile(attempt + 1), 2000);
+                  }
                 }
-              }, 3000);
+              };
+              
+              // Start checking profile
+              setTimeout(() => checkProfile(), 2000);
             }
           }
         } catch (err) {
@@ -453,26 +470,6 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
                     <span className="px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
                       Active
                     </span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ) : !profile?.is_paid ? (
-            // Show purchase banner only when user doesn't have a paid plan
-            <Card className="border-yellow-200 bg-yellow-50">
-              <CardContent className="pt-6">
-                <div className="flex items-start gap-4">
-                  <AlertCircle className="h-6 w-6 text-yellow-600 flex-shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                      Purchase a Plan to Get Started
-                    </h3>
-                    <p className="text-gray-700 mb-4">
-                      You need to purchase a plan to analyze your throws. Choose between our Starter Plan (3 analyses) or Monthly Plan (12 analyses per month).
-                    </p>
-                    <Link href="/pricing">
-                      <Button variant="primary">View Pricing Plans</Button>
-                    </Link>
                   </div>
                 </div>
               </CardContent>
