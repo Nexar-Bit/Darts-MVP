@@ -20,27 +20,51 @@ export default function BillingPage() {
   const [portalLoading, setPortalLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const loadUserData = async () => {
-      try {
-        const supabase = createSupabaseClient();
-        const { data: { session } } = await supabase.auth.getSession();
+  const loadUserData = async () => {
+    try {
+      const supabase = createSupabaseClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (session?.user) {
+        setUser(session.user);
         
-        if (session?.user) {
-          setUser(session.user);
-          
-          const { profile: userProfile } = await getCurrentUserProfile();
+        const { profile: userProfile, error: profileError } = await getCurrentUserProfile();
+        if (userProfile) {
           setProfile(userProfile);
+          console.log('Profile loaded:', userProfile);
+        } else if (profileError) {
+          console.error('Profile error:', profileError);
         }
-      } catch (error) {
-        console.error('Error loading user data:', error);
-        setError('Failed to load billing information');
-      } finally {
-        setLoading(false);
       }
-    };
+    } catch (error) {
+      console.error('Error loading user data:', error);
+      setError('Failed to load billing information');
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  useEffect(() => {
     loadUserData();
+    
+    // Check if we're returning from Stripe checkout
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('session_id');
+    
+    if (sessionId) {
+      // Remove session_id from URL
+      window.history.replaceState({}, '', '/dashboard/billing');
+      
+      // Wait a moment for webhook/verify-session to process, then refresh
+      setTimeout(() => {
+        loadUserData();
+      }, 2000);
+      
+      // Also refresh after a longer delay in case webhook is slow
+      setTimeout(() => {
+        loadUserData();
+      }, 5000);
+    }
   }, []);
 
   const handleSignOut = async () => {
@@ -131,8 +155,23 @@ export default function BillingPage() {
           {/* Current Subscription */}
           <Card>
             <CardHeader>
-              <CardTitle>Current Subscription</CardTitle>
-              <CardDescription>Your subscription status and plan details</CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Current Subscription</CardTitle>
+                  <CardDescription>Your subscription status and plan details</CardDescription>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setLoading(true);
+                    loadUserData();
+                  }}
+                  disabled={loading}
+                >
+                  {loading ? 'Refreshing...' : 'Refresh'}
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between">

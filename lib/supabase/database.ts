@@ -27,21 +27,57 @@ export async function getUserProfile(userId: string): Promise<{
   const supabase = createSupabaseClient();
   
   try {
+    // Ensure we have a valid session before querying
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    
+    if (sessionError || !session) {
+      console.error('No active session for profile fetch:', sessionError);
+      return {
+        profile: null,
+        error: null, // Auth errors are not PostgrestErrors
+      };
+    }
+
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', userId)
       .single();
 
-    // If table doesn't exist or profile not found, return null without error
+    // Handle errors
     if (error) {
-      // 406 or 404 errors mean table doesn't exist or profile not found - return null gracefully
-      if (error.code === 'PGRST116' || error.code === '42P01' || error.message?.includes('relation') || error.message?.includes('does not exist')) {
+      console.error('Error fetching profile:', error);
+      
+      // 406 errors can mean RLS blocked the query or Accept header issue
+      // Check for 406 status code in message or specific error codes
+      const is406Error = error.code === 'PGRST116' || 
+                        error.message?.includes('406') || 
+                        error.message?.toLowerCase().includes('not acceptable');
+      
+      if (is406Error) {
+        // Try to get more info about the error
+        console.warn('Profile fetch returned 406 - RLS or header issue:', {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+        });
+        
+        // Return null gracefully - might be RLS blocking
         return {
           profile: null,
           error: null,
         };
       }
+      
+      // 404 or table doesn't exist errors
+      if (error.code === '42P01' || error.message?.includes('relation') || error.message?.includes('does not exist')) {
+        return {
+          profile: null,
+          error: null,
+        };
+      }
+      
       return {
         profile: null,
         error: error as PostgrestError | null,
@@ -71,12 +107,33 @@ export async function getCurrentUserProfile(): Promise<{
 }> {
   const supabase = createSupabaseClient();
   
+  // First check session to ensure we have valid auth
+  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+  
+  if (sessionError) {
+    console.error('Session error in getCurrentUserProfile:', sessionError);
+    return {
+      profile: null,
+      error: null, // Auth errors are not PostgrestErrors
+    };
+  }
+  
+  if (!session) {
+    console.warn('No session found in getCurrentUserProfile');
+    return {
+      profile: null,
+      error: null,
+    };
+  }
+  
+  // Get user from session or by calling getUser
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   
   if (authError || !user) {
+    console.error('Auth error in getCurrentUserProfile:', authError);
     return {
       profile: null,
-      error: authError as PostgrestError | null,
+      error: null, // Auth errors are not PostgrestErrors
     };
   }
 
@@ -152,7 +209,7 @@ export async function updateCurrentUserProfile(
   if (authError || !user) {
     return {
       profile: null,
-      error: authError as PostgrestError | null,
+      error: null, // Auth errors are not PostgrestErrors
     };
   }
 

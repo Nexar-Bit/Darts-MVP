@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createSupabaseClient } from '@/lib/supabase/supabaseClient';
@@ -33,6 +33,7 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const verificationAttemptedRef = useRef<string | null>(null);
 
   useEffect(() => {
     // Check for session_id in URL (from Stripe checkout redirect)
@@ -40,13 +41,20 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
       const params = new URLSearchParams(window.location.search);
       const sessionId = params.get('session_id');
       
-      if (sessionId) {
+      // Only verify once per session_id - use ref to persist across renders
+      if (sessionId && verificationAttemptedRef.current !== sessionId) {
+        verificationAttemptedRef.current = sessionId;
+        
+        // Remove session_id from URL IMMEDIATELY to prevent re-triggering
+        window.history.replaceState({}, '', '/dashboard');
+        
         // Verify the session and update profile
         try {
           const supabase = createSupabaseClient();
           const { data: { session } } = await supabase.auth.getSession();
           
           if (!session?.access_token) {
+            console.warn('No session token available for verification');
             return;
           }
 
@@ -66,106 +74,164 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
           if (data.success && data.updated) {
             toast.success(`Successfully activated ${data.planType === 'starter' ? 'Starter' : 'Monthly'} Plan!`);
             
-            // Force refresh profile immediately
-            const { profile: updatedProfile } = await getCurrentUserProfile();
-            if (updatedProfile) {
-              setProfile(updatedProfile);
-              console.log('Profile updated after purchase:', updatedProfile);
+            // Use profile from response if available, otherwise fetch it
+            if (data.profile) {
+              setProfile(data.profile);
+              console.log('Profile updated from response:', data.profile);
+              // Force a re-render by updating state
+              if (!data.profile.is_paid) {
+                console.warn('Profile from response shows is_paid=false, but update was successful. Retrying...');
+                setTimeout(async () => {
+                  const { profile: retryProfile } = await getCurrentUserProfile();
+                  if (retryProfile) {
+                    setProfile(retryProfile);
+                    console.log('Profile retry after delay:', retryProfile);
+                  }
+                }, 1000);
+              }
             } else {
-              // If profile fetch fails, try again after a short delay
-              setTimeout(async () => {
-                const { profile: retryProfile } = await getCurrentUserProfile();
-                if (retryProfile) {
-                  setProfile(retryProfile);
+              // Fallback: refresh profile immediately and retry if needed
+              try {
+                // First immediate refresh
+                const { profile: updatedProfile } = await getCurrentUserProfile();
+                if (updatedProfile) {
+                  setProfile(updatedProfile);
+                  console.log('Profile updated after purchase:', updatedProfile);
+                  
+                  // If still not showing as paid, wait a moment and try again (webhook might be processing)
+                  if (!updatedProfile.is_paid) {
+                    setTimeout(async () => {
+                      const { profile: retryProfile } = await getCurrentUserProfile();
+                      if (retryProfile) {
+                        setProfile(retryProfile);
+                        console.log('Profile retry after delay:', retryProfile);
+                        // One more retry if still not paid
+                        if (!retryProfile.is_paid) {
+                          setTimeout(async () => {
+                            const { profile: finalProfile } = await getCurrentUserProfile();
+                            if (finalProfile) {
+                              setProfile(finalProfile);
+                              console.log('Final profile retry:', finalProfile);
+                            }
+                          }, 3000);
+                        }
+                      }
+                    }, 2000);
+                  }
                 }
-              }, 1000);
+              } catch (err) {
+                console.error('Error refreshing profile:', err);
+              }
             }
-            
-            // Remove session_id from URL
-            window.history.replaceState({}, '', '/dashboard');
           } else if (data.success && !data.updated) {
             // Session verified but not updated - might be processing or webhook already handled it
             console.log('Session verified but not updated:', data.message);
             
-            // Wait a moment for webhook to process, then refresh profile
+            // Try to refresh profile once after a delay
             setTimeout(async () => {
-              const { profile: updatedProfile } = await getCurrentUserProfile();
-              if (updatedProfile) {
-                setProfile(updatedProfile);
-                console.log('Profile refreshed after delay:', updatedProfile);
-                // If profile shows as paid now, show success message
-                if (updatedProfile.is_paid) {
-                  toast.success(`Successfully activated ${updatedProfile.plan_type === 'starter' ? 'Starter' : 'Monthly'} Plan!`);
-                } else {
-                  // If still not paid, try one more time after another delay
-                  setTimeout(async () => {
-                    const { profile: finalProfile } = await getCurrentUserProfile();
-                    if (finalProfile) {
-                      setProfile(finalProfile);
-                      if (finalProfile.is_paid) {
-                        toast.success(`Plan activated!`);
-                      }
-                    }
-                  }, 3000);
+              try {
+                const { profile: updatedProfile } = await getCurrentUserProfile();
+                if (updatedProfile) {
+                  setProfile(updatedProfile);
+                  if (updatedProfile.is_paid) {
+                    toast.success(`Successfully activated ${updatedProfile.plan_type === 'starter' ? 'Starter' : 'Monthly'} Plan!`);
+                  }
                 }
+              } catch (err) {
+                console.error('Error refreshing profile:', err);
               }
             }, 2000);
-            
-            // Remove session_id from URL
-            window.history.replaceState({}, '', '/dashboard');
           } else if (data.error) {
             console.error('Session verification error:', data.error);
-            toast.error(`Failed to verify payment: ${data.error}`);
-            // Still try to refresh profile in case webhook processed it
-            setTimeout(async () => {
-              const { profile: updatedProfile } = await getCurrentUserProfile();
-              if (updatedProfile && updatedProfile.is_paid) {
-                setProfile(updatedProfile);
-                toast.success(`Plan activated!`);
-              }
-            }, 2000);
+            
+            // Check if migration is required
+            if (data.migrationRequired || data.error.includes('migration') || data.error.includes('PGRST204')) {
+              // Migration needed - show helpful message
+              toast.error(
+                `Database migration required. Your payment was processed, but please run the migration in Supabase to activate all features.`,
+                10000
+              );
+              
+              // Still try to refresh profile in case basic update succeeded
+              setTimeout(async () => {
+                try {
+                  const { profile: updatedProfile } = await getCurrentUserProfile();
+                  if (updatedProfile) {
+                    setProfile(updatedProfile);
+                    if (updatedProfile.is_paid) {
+                      toast.success(`Plan activated! (Run migration for full features)`);
+                    }
+                  }
+                } catch (err) {
+                  console.error('Error refreshing profile:', err);
+                }
+              }, 2000);
+            } else if (data.warning) {
+              // Migration needed but basic update succeeded
+              toast.success(`Plan activated! (Some features require database migration)`);
+              // Still try to refresh profile
+              setTimeout(async () => {
+                try {
+                  const { profile: updatedProfile } = await getCurrentUserProfile();
+                  if (updatedProfile) {
+                    setProfile(updatedProfile);
+                  }
+                } catch (err) {
+                  console.error('Error refreshing profile:', err);
+                }
+              }, 1000);
+            } else {
+              // Other error
+              toast.error(`Payment verification failed. Please refresh the page.`);
+              
+              // Try to refresh profile once in case webhook processed it
+              setTimeout(async () => {
+                try {
+                  const { profile: updatedProfile } = await getCurrentUserProfile();
+                  if (updatedProfile && updatedProfile.is_paid) {
+                    setProfile(updatedProfile);
+                    toast.success(`Plan activated!`);
+                  }
+                } catch (err) {
+                  console.error('Error refreshing profile:', err);
+                }
+              }, 3000);
+            }
           }
         } catch (err) {
           console.error('Error verifying session:', err);
+          toast.error('Failed to verify payment. Please refresh the page.');
         }
       }
     };
 
-    // Refresh profile data
+    // Refresh profile data function
     const refreshProfile = async () => {
       try {
-        const { profile: updatedProfile } = await getCurrentUserProfile();
+        const { profile: updatedProfile, error } = await getCurrentUserProfile();
         if (updatedProfile) {
           setProfile(updatedProfile);
           console.log('Profile loaded:', updatedProfile);
+        } else if (error) {
+          // Log error but don't retry - might be RLS or migration issue
+          console.warn('Profile load error (non-critical):', error);
         }
       } catch (err) {
-        console.error('Error refreshing profile:', err);
+        // Don't log errors that might cause re-renders
+        console.warn('Error refreshing profile:', err);
       }
     };
 
-    checkSessionId();
-    refreshProfile();
-    
-    // Also refresh profile periodically if there's a session_id in URL (in case of delays)
+    // Check if we're returning from Stripe checkout
     const params = new URLSearchParams(window.location.search);
-    const sessionId = params.get('session_id');
-    if (sessionId) {
-      // Refresh profile every 2 seconds for up to 10 seconds after returning from checkout
-      let attempts = 0;
-      const refreshInterval = setInterval(async () => {
-        attempts++;
-        const { profile: updatedProfile } = await getCurrentUserProfile();
-        if (updatedProfile) {
-          setProfile(updatedProfile);
-          if (updatedProfile.is_paid || attempts >= 5) {
-            clearInterval(refreshInterval);
-          }
-        }
-      }, 2000);
-      
-      // Clean up interval after 10 seconds
-      setTimeout(() => clearInterval(refreshInterval), 10000);
+    const hasSessionId = params.get('session_id');
+    
+    if (hasSessionId) {
+      // Verify session and refresh profile
+      checkSessionId();
+    } else {
+      // Normal page load - just refresh profile
+      refreshProfile();
     }
   }, [toast]);
 
@@ -333,20 +399,38 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
         <div className="space-y-8">
           {/* Welcome Section */}
           <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-lg p-8 text-white">
-            <h1 className="text-3xl md:text-4xl font-bold mb-2">
-              Welcome back{initialUser?.email ? `, ${initialUser.email.split('@')[0]}` : ''}!
-            </h1>
-            <p className="text-blue-100 text-lg">
-              {profile?.is_paid 
-                ? profile?.plan_type === 'monthly'
-                  ? "You're on the Monthly Plan with 12 analyses per month. Let's get started!"
-                  : "You're on the Starter Plan with 3 analyses. Let's get started!"
-                : "Ready to start analyzing your throws? Choose a plan to get started."}
-            </p>
+            <div className="flex items-start justify-between">
+              <div className="flex-1">
+                <h1 className="text-3xl md:text-4xl font-bold mb-2">
+                  Welcome back{initialUser?.email ? `, ${initialUser.email.split('@')[0]}` : ''}!
+                </h1>
+                <p className="text-blue-100 text-lg">
+                  {profile?.is_paid 
+                    ? profile?.plan_type === 'monthly'
+                      ? "You're on the Monthly Plan with 12 analyses per month. Let's get started!"
+                      : "You're on the Starter Plan with 3 analyses. Let's get started!"
+                    : "Ready to start analyzing your throws? Choose a plan to get started."}
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  const { profile: updatedProfile } = await getCurrentUserProfile();
+                  if (updatedProfile) {
+                    setProfile(updatedProfile);
+                    toast.success('Profile refreshed!');
+                  }
+                }}
+                className="bg-white/10 hover:bg-white/20 text-white border-white/20 ml-4"
+              >
+                Refresh
+              </Button>
+            </div>
           </div>
 
-          {/* Membership Status */}
-          {profile?.is_paid ? (
+          {/* Membership Status - Show when user has a paid plan */}
+          {profile?.is_paid && profile?.plan_type ? (
             <Card className="border-blue-200 bg-blue-50">
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
@@ -369,6 +453,26 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
                     <span className="px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
                       Active
                     </span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ) : !profile?.is_paid ? (
+            // Show purchase banner only when user doesn't have a paid plan
+            <Card className="border-yellow-200 bg-yellow-50">
+              <CardContent className="pt-6">
+                <div className="flex items-start gap-4">
+                  <AlertCircle className="h-6 w-6 text-yellow-600 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                      Purchase a Plan to Get Started
+                    </h3>
+                    <p className="text-gray-700 mb-4">
+                      You need to purchase a plan to analyze your throws. Choose between our Starter Plan (3 analyses) or Monthly Plan (12 analyses per month).
+                    </p>
+                    <Link href="/pricing">
+                      <Button variant="primary">View Pricing Plans</Button>
+                    </Link>
                   </div>
                 </div>
               </CardContent>

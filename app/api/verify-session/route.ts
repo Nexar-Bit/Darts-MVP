@@ -97,37 +97,110 @@ export async function POST(request: NextRequest) {
             ? session.customer
             : session.customer?.id;
 
+          // Build updates object
           const updates: any = {
             is_paid: true,
             plan_type: 'starter',
-            analysis_limit: 3,
-            analysis_count: 0,
             plan_purchased_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           };
+          
+          // Add usage tracking fields (will fail gracefully if columns don't exist)
+          updates.analysis_limit = 3;
+          updates.analysis_count = 0;
 
           if (customerId) {
             updates.stripe_customer_id = customerId;
           }
 
-          const { error: updateError } = await supabaseServer
+          const { error: updateError, data: updatedData } = await supabaseServer
             .from('profiles')
             .update(updates)
-            .eq('id', user.id);
+            .eq('id', user.id)
+            .select()
+            .single();
 
           if (updateError) {
             console.error('Error updating profile:', updateError);
+            
+            // Check if error is about missing columns (PGRST204 or message contains column name)
+            const isMissingColumnError = 
+              updateError.code === 'PGRST204' ||
+              updateError.message?.includes('analysis_count') ||
+              updateError.message?.includes('analysis_limit') ||
+              updateError.message?.includes('last_analysis_reset') ||
+              updateError.message?.includes('plan_type') ||
+              updateError.message?.includes('plan_purchased_at') ||
+              updateError.message?.includes('Could not find') ||
+              updateError.message?.includes('schema cache');
+            
+            if (isMissingColumnError) {
+              console.warn('Usage tracking columns not found - updating basic fields only');
+              const basicUpdates: any = {
+                is_paid: true,
+                plan_purchased_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              };
+              
+              if (customerId) {
+                basicUpdates.stripe_customer_id = customerId;
+              }
+              
+              // Try to update plan_type if column exists, otherwise skip it
+              try {
+                basicUpdates.plan_type = 'starter';
+              } catch (e) {
+                // plan_type column might not exist either
+                console.warn('plan_type column may not exist');
+              }
+              
+              const { error: basicError, data: basicData } = await supabaseServer
+                .from('profiles')
+                .update(basicUpdates)
+                .eq('id', user.id)
+                .select()
+                .single();
+              
+              if (basicError) {
+                console.error('Basic update also failed:', basicError);
+                // Even basic update failed - might be RLS or other issue
+                return NextResponse.json(
+                  { 
+                    error: 'Failed to update profile. Database migration required.',
+                    updated: false, 
+                    details: basicError,
+                    migrationRequired: true,
+                  },
+                  { status: 500 }
+                );
+              }
+              
+              // Basic update succeeded - return success but note migration needed
+              console.log('Profile updated successfully (basic fields only - migration needed for usage tracking)');
+              return NextResponse.json({
+                success: true,
+                updated: true,
+                planType: 'starter',
+                isPaid: true,
+                warning: 'Database migration needed for usage tracking features',
+                migrationRequired: true,
+              });
+            }
+            
             return NextResponse.json(
               { error: 'Failed to update profile', updated: false, details: updateError },
               { status: 500 }
             );
           }
 
+          console.log('Profile updated successfully:', updatedData);
+          
           return NextResponse.json({
             success: true,
             updated: true,
             planType: 'starter',
             isPaid: true,
+            profile: updatedData,
           });
         } else {
           // Payment not completed yet
@@ -160,22 +233,25 @@ export async function POST(request: NextRequest) {
               customerId,
             });
 
+            // Build updates object
             const updates: any = {
               is_paid: isActive,
               plan_type: 'monthly',
-              analysis_limit: 12,
-              analysis_count: 0,
-              last_analysis_reset: new Date().toISOString(),
               plan_purchased_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
               stripe_subscription_id: subscriptionId,
             };
+            
+            // Add usage tracking fields (will fail gracefully if columns don't exist)
+            updates.analysis_limit = 12;
+            updates.analysis_count = 0;
+            updates.last_analysis_reset = new Date().toISOString();
 
             if (customerId) {
               updates.stripe_customer_id = customerId;
             }
 
-            const { error: updateError, data: updatedProfile } = await supabaseServer
+            const { error: updateError, data: updatedProfileData } = await supabaseServer
               .from('profiles')
               .update(updates)
               .eq('id', user.id)
@@ -184,13 +260,79 @@ export async function POST(request: NextRequest) {
 
             if (updateError) {
               console.error('Error updating profile:', updateError);
+              
+              // Check if error is about missing columns (PGRST204 or message contains column name)
+              const isMissingColumnError = 
+                updateError.code === 'PGRST204' ||
+                updateError.message?.includes('analysis_count') ||
+                updateError.message?.includes('analysis_limit') ||
+                updateError.message?.includes('last_analysis_reset') ||
+                updateError.message?.includes('plan_type') ||
+                updateError.message?.includes('plan_purchased_at') ||
+                updateError.message?.includes('Could not find') ||
+                updateError.message?.includes('schema cache');
+              
+              if (isMissingColumnError) {
+                console.warn('Usage tracking columns not found - updating basic fields only');
+                const basicUpdates: any = {
+                  is_paid: isActive,
+                  updated_at: new Date().toISOString(),
+                  stripe_subscription_id: subscriptionId,
+                };
+                
+                if (customerId) {
+                  basicUpdates.stripe_customer_id = customerId;
+                }
+                
+                // Try to add optional fields if they exist
+                try {
+                  basicUpdates.plan_type = 'monthly';
+                  basicUpdates.plan_purchased_at = new Date().toISOString();
+                } catch (e) {
+                  // Columns might not exist
+                  console.warn('Some columns may not exist');
+                }
+                
+                const { error: basicError, data: basicProfile } = await supabaseServer
+                  .from('profiles')
+                  .update(basicUpdates)
+                  .eq('id', user.id)
+                  .select()
+                  .single();
+                
+                if (basicError) {
+                  console.error('Basic update also failed:', basicError);
+                  return NextResponse.json(
+                    { 
+                      error: 'Failed to update profile. Database migration required.',
+                      updated: false, 
+                      details: basicError,
+                      migrationRequired: true,
+                    },
+                    { status: 500 }
+                  );
+                }
+                
+                // Basic update succeeded - return success but note migration needed
+                console.log('Profile updated successfully (basic fields only - migration needed for usage tracking)');
+                return NextResponse.json({
+                  success: true,
+                  updated: true,
+                  planType: 'monthly',
+                  isPaid: isActive,
+                  subscriptionStatus: subscription.status,
+                  warning: 'Database migration needed for usage tracking features',
+                  migrationRequired: true,
+                });
+              }
+              
               return NextResponse.json(
                 { error: 'Failed to update profile', updated: false, details: updateError },
                 { status: 500 }
               );
             }
 
-            console.log('Profile updated successfully:', updatedProfile);
+                console.log('Profile updated successfully:', updatedProfileData);
 
             return NextResponse.json({
               success: true,
@@ -198,6 +340,7 @@ export async function POST(request: NextRequest) {
               planType: 'monthly',
               isPaid: isActive,
               subscriptionStatus: subscription.status,
+              profile: updatedProfileData,
             });
           } catch (error: any) {
             console.error('Error retrieving subscription:', error);
