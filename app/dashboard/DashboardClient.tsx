@@ -176,7 +176,7 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
     : 0;
 
   return (
-    <ProtectedRoute requirePaid={true}>
+    <ProtectedRoute>
       <ToastContainer toasts={toast.toasts} onClose={toast.removeToast} />
       <DashboardLayout
         user={initialUser ? { email: initialUser.email } : null}

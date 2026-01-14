@@ -48,12 +48,12 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
         if (shouldCheckPayment) {
           const { profile: userProfile, error: profileError } = await getCurrentUserProfile();
           
-          if (profileError || !userProfile) {
+          if (profileError) {
             console.error('Error fetching profile:', profileError);
             // If we can't fetch profile, allow through but log error
             // The server-side middleware will catch it
             setProfile(null);
-          } else {
+          } else if (userProfile) {
             setProfile(userProfile);
             
             // Check if user is paid
@@ -63,6 +63,9 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
               router.push(pricingUrl);
               return;
             }
+          } else {
+            // Profile doesn't exist yet - allow through (profile will be created)
+            setProfile(null);
           }
         }
       } catch (error) {
