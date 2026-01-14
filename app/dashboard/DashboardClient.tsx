@@ -35,6 +35,50 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Check for session_id in URL (from Stripe checkout redirect)
+    const checkSessionId = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const sessionId = params.get('session_id');
+      
+      if (sessionId) {
+        // Verify the session and update profile
+        try {
+          const supabase = createSupabaseClient();
+          const { data: { session } } = await supabase.auth.getSession();
+          
+          if (!session?.access_token) {
+            return;
+          }
+
+          const response = await fetch('/api/verify-session', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({ sessionId }),
+          });
+
+          const data = await response.json();
+          
+          if (data.success && data.updated) {
+            toast.success(`Successfully activated ${data.planType === 'starter' ? 'Starter' : 'Monthly'} Plan!`);
+            
+            // Refresh profile
+            const { profile: updatedProfile } = await getCurrentUserProfile();
+            if (updatedProfile) {
+              setProfile(updatedProfile);
+            }
+            
+            // Remove session_id from URL
+            window.history.replaceState({}, '', '/dashboard');
+          }
+        } catch (err) {
+          console.error('Error verifying session:', err);
+        }
+      }
+    };
+
     // Refresh profile data
     const refreshProfile = async () => {
       try {
@@ -47,8 +91,9 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
       }
     };
 
+    checkSessionId();
     refreshProfile();
-  }, []);
+  }, [toast]);
 
   const handleSignOut = async () => {
     const supabase = createSupabaseClient();

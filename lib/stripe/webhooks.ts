@@ -304,10 +304,42 @@ async function handleCheckoutSessionCompleted(
       console.error('Error updating profile for checkout session completed (payment):', error);
     }
   } else if (mode === 'subscription') {
-    // Subscription mode - the subscription.created event will handle the details
-    // But we can ensure customer ID is set here
-    // The subscription metadata will be handled by subscription.created webhook
-    console.log('Checkout session completed for subscription - subscription.created event will handle details');
+    // Subscription mode - update profile immediately
+    const subscriptionId = typeof session.subscription === 'string'
+      ? session.subscription
+      : session.subscription?.id;
+
+    if (subscriptionId) {
+      try {
+        // Retrieve subscription to get status
+        const subscription = await getStripe().subscriptions.retrieve(subscriptionId);
+        const isPaid = subscription.status === 'active' || subscription.status === 'trialing';
+        
+        const supabase = createSupabaseServerClient();
+        const { error } = await supabase
+          .from('profiles')
+          .update({
+            is_paid: isPaid,
+            plan_type: 'monthly',
+            analysis_limit: 12,
+            analysis_count: 0,
+            last_analysis_reset: new Date().toISOString(),
+            plan_purchased_at: new Date().toISOString(),
+            stripe_subscription_id: subscriptionId,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', userId);
+
+        if (error) {
+          console.error('Error updating profile for checkout session completed (subscription):', error);
+        }
+      } catch (error) {
+        console.error('Error retrieving subscription in checkout handler:', error);
+        // Fallback: subscription.created webhook will handle it
+      }
+    } else {
+      console.log('No subscription ID in checkout session - subscription.created event will handle details');
+    }
   }
 }
 
