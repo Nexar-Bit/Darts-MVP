@@ -12,6 +12,7 @@ import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import { Upload, Video, AlertCircle, CheckCircle, Loader2, FileText, X } from 'lucide-react';
 import { useToast, ToastContainer } from '@/components/ui/Toast';
+import AnalysisResults, { type AnalysisResult } from '@/components/dashboard/AnalysisResults';
 import type { UserProfile } from '@/lib/supabase/database';
 
 interface DashboardClientProps {
@@ -28,8 +29,9 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
   const [profile, setProfile] = useState<UserProfile | null>(initialProfile);
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [analysisResult, setAnalysisResult] = useState<any>(null);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -123,31 +125,40 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
         body: formData,
       });
 
-      const data = await response.json();
+      // Handle streaming response if backend supports it
+      const contentType = response.headers.get('content-type');
+      let data;
+      
+      if (contentType?.includes('application/json')) {
+        data = await response.json();
+      } else {
+        // Handle text response
+        const text = await response.text();
+        try {
+          data = JSON.parse(text);
+        } catch {
+          throw new Error('Invalid response from server');
+        }
+      }
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to analyze video');
       }
 
-      // Simulate analysis result (replace with actual API response)
-      const mockResult = {
-        id: data.analysisId || `analysis_${Date.now()}`,
-        status: 'completed',
-        timestamp: new Date().toISOString(),
-        insights: [
-          'Release angle: 45° (optimal)',
-          'Follow-through: Good extension',
-          'Wrist position: Slight adjustment needed',
-          'Stance: Balanced and stable',
-        ],
-        recommendations: [
-          'Focus on maintaining consistent release angle',
-          'Work on wrist snap timing',
-          'Continue practicing follow-through',
-        ],
+      // Handle different response formats
+      const result: AnalysisResult = {
+        id: data.analysisId || data.id || `analysis_${Date.now()}`,
+        status: data.status || 'completed',
+        timestamp: data.results?.timestamp || data.timestamp || new Date().toISOString(),
+        insights: data.results?.insights || data.insights || [],
+        recommendations: data.results?.recommendations || data.recommendations || [],
+        metrics: data.results?.metrics || data.metrics,
+        videoUrl: data.results?.videoUrl || data.videoUrl,
+        reportUrl: data.results?.reportUrl || data.reportUrl,
       };
 
-      setAnalysisResult(mockResult);
+      setAnalysisResult(result);
+      setUploadProgress(100);
       toast.success('Analysis completed successfully!');
       
       // Refresh profile to update analysis count
@@ -159,6 +170,16 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
       console.error('Analysis error:', err);
       const errorMessage = err.message || 'Failed to analyze video. Please try again.';
       setError(errorMessage);
+      setUploadProgress(0);
+      
+      // Set failed status if we have a result object
+      if (analysisResult) {
+        setAnalysisResult({
+          ...analysisResult,
+          status: 'failed',
+        });
+      }
+      
       toast.error(errorMessage);
     } finally {
       setAnalyzing(false);
@@ -169,6 +190,14 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
     setSelectedFile(null);
     setAnalysisResult(null);
     setError(null);
+    setUploadProgress(0);
+  };
+
+  const handleNewAnalysis = () => {
+    setSelectedFile(null);
+    setAnalysisResult(null);
+    setError(null);
+    setUploadProgress(0);
   };
 
   const remaining = profile?.analysis_limit && profile.analysis_count !== undefined
@@ -272,6 +301,22 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
                   )}
                 </div>
 
+                {/* Upload Progress */}
+                {analyzing && uploadProgress > 0 && uploadProgress < 100 && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-sm text-gray-600">
+                      <span>Uploading...</span>
+                      <span>{uploadProgress}%</span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div
+                        className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                        style={{ width: `${uploadProgress}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {/* Analyze Button */}
                 <Button
                   variant="primary"
@@ -284,7 +329,7 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
                   {analyzing ? (
                     <>
                       <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                      Analyzing...
+                      {uploadProgress > 0 && uploadProgress < 100 ? 'Uploading...' : 'Analyzing...'}
                     </>
                   ) : (
                     <>
@@ -309,48 +354,10 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
 
                 {/* Results Display */}
                 {analysisResult && (
-                  <Card className="border-green-200 bg-green-50">
-                    <CardHeader>
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="text-xl">Analysis Results</CardTitle>
-                        <CheckCircle className="h-6 w-6 text-green-600" />
-                      </div>
-                      <CardDescription>
-                        Analysis completed at {new Date(analysisResult.timestamp).toLocaleString()}
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div>
-                        <h4 className="font-semibold text-gray-900 mb-2">Key Insights</h4>
-                        <ul className="space-y-2">
-                          {analysisResult.insights?.map((insight: string, index: number) => (
-                            <li key={index} className="flex items-start text-sm text-gray-700">
-                              <CheckCircle className="h-4 w-4 text-green-600 mr-2 flex-shrink-0 mt-0.5" />
-                              <span>{insight}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                      <div>
-                        <h4 className="font-semibold text-gray-900 mb-2">Recommendations</h4>
-                        <ul className="space-y-2">
-                          {analysisResult.recommendations?.map((rec: string, index: number) => (
-                            <li key={index} className="flex items-start text-sm text-gray-700">
-                              <FileText className="h-4 w-4 text-blue-600 mr-2 flex-shrink-0 mt-0.5" />
-                              <span>{rec}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                      <div className="pt-4 border-t border-green-200">
-                        <Link href="/dashboard/analyze">
-                          <Button variant="outline" size="sm">
-                            View Full Analysis
-                          </Button>
-                        </Link>
-                      </div>
-                    </CardContent>
-                  </Card>
+                  <AnalysisResults 
+                    result={analysisResult} 
+                    onNewAnalysis={handleNewAnalysis}
+                  />
                 )}
               </CardContent>
             </Card>

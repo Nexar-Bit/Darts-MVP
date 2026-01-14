@@ -54,6 +54,16 @@ export async function createCheckoutSession({
           },
         },
       }),
+      // For one-time payments, ensure customer creation and metadata
+      ...(mode === 'payment' && {
+        customer_creation: 'always',
+        payment_intent_data: {
+          metadata: {
+            userId,
+            ...metadata,
+          },
+        },
+      }),
     });
 
     return {

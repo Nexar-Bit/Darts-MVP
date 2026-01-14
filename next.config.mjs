@@ -14,6 +14,29 @@ const nextConfig = {
       fullUrl: false,
     },
   },
+  // Production optimizations
+  reactStrictMode: true,
+  swcMinify: true,
+  // Image optimization
+  images: {
+    formats: ['image/avif', 'image/webp'],
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: '**.supabase.co',
+      },
+    ],
+  },
+  // Environment variables that should be available at build time
+  env: {
+    // These are already available via process.env, but explicitly listed for clarity
+  },
+  // Output configuration for Vercel
+  output: 'standalone',
+  // Experimental features
+  experimental: {
+    // Enable server actions if needed in the future
+  },
 };
 
 export default nextConfig;

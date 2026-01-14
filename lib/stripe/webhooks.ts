@@ -30,14 +30,45 @@ export async function constructWebhookEvent(
 }
 
 /**
+ * Gets userId from subscription or customer metadata
+ */
+async function getUserIdFromSubscription(subscription: Stripe.Subscription): Promise<string | null> {
+  // First try subscription metadata
+  if (subscription.metadata?.userId) {
+    return subscription.metadata.userId;
+  }
+
+  // If not in subscription metadata, try customer metadata
+  const customerId = typeof subscription.customer === 'string'
+    ? subscription.customer
+    : subscription.customer.id;
+
+  try {
+    const customer = await getStripe().customers.retrieve(customerId);
+    // Narrow type: Stripe.Customer | Stripe.DeletedCustomer
+    if ('deleted' in customer && customer.deleted) {
+      return null;
+    }
+
+    if (customer.metadata?.userId) {
+      return customer.metadata.userId;
+    }
+  } catch (error) {
+    console.error('Error retrieving customer:', error);
+  }
+
+  return null;
+}
+
+/**
  * Handles customer subscription created event
  */
 async function handleSubscriptionCreated(
   subscription: Stripe.Subscription
 ): Promise<void> {
-  const userId = subscription.metadata?.userId;
+  const userId = await getUserIdFromSubscription(subscription);
   if (!userId) {
-    console.error('No userId in subscription metadata');
+    console.error('No userId found in subscription or customer metadata');
     return;
   }
 
@@ -52,7 +83,7 @@ async function handleSubscriptionCreated(
   
   // Update subscription with plan type and limits
   const supabase = createSupabaseServerClient();
-  await supabase
+  const { error } = await supabase
     .from('profiles')
     .update({
       stripe_subscription_id: subscription.id,
@@ -65,6 +96,10 @@ async function handleSubscriptionCreated(
       updated_at: new Date().toISOString(),
     })
     .eq('id', userId);
+
+  if (error) {
+    console.error('Error updating profile for subscription created:', error);
+  }
 }
 
 /**
@@ -73,19 +108,33 @@ async function handleSubscriptionCreated(
 async function handleSubscriptionUpdated(
   subscription: Stripe.Subscription
 ): Promise<void> {
-  const userId = subscription.metadata?.userId;
+  const userId = await getUserIdFromSubscription(subscription);
   if (!userId) {
-    console.error('No userId in subscription metadata');
+    console.error('No userId found in subscription or customer metadata');
     return;
   }
 
+  // Determine payment status based on subscription status
   const isPaid = subscription.status === 'active' || subscription.status === 'trialing';
   
-  await updateStripeSubscription(
-    userId,
-    subscription.id,
-    isPaid
-  );
+  const supabase = createSupabaseServerClient();
+  const { error } = await supabase
+    .from('profiles')
+    .update({
+      stripe_subscription_id: subscription.id,
+      is_paid: isPaid,
+      updated_at: new Date().toISOString(),
+      // If subscription is canceled or past_due, keep subscription ID but mark as unpaid
+      ...(subscription.status === 'canceled' && {
+        plan_type: 'free',
+        analysis_limit: 0,
+      }),
+    })
+    .eq('id', userId);
+
+  if (error) {
+    console.error('Error updating profile for subscription updated:', error);
+  }
 }
 
 /**
@@ -94,14 +143,28 @@ async function handleSubscriptionUpdated(
 async function handleSubscriptionDeleted(
   subscription: Stripe.Subscription
 ): Promise<void> {
-  const userId = subscription.metadata?.userId;
+  const userId = await getUserIdFromSubscription(subscription);
   if (!userId) {
-    console.error('No userId in subscription metadata');
+    console.error('No userId found in subscription or customer metadata');
     return;
   }
 
   // Set subscription to null and is_paid to false
-  await updateStripeSubscription(userId, null, false);
+  const supabase = createSupabaseServerClient();
+  const { error } = await supabase
+    .from('profiles')
+    .update({
+      stripe_subscription_id: null,
+      is_paid: false,
+      plan_type: 'free',
+      analysis_limit: 0,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', userId);
+
+  if (error) {
+    console.error('Error updating profile for subscription deleted:', error);
+  }
 }
 
 /**
@@ -120,15 +183,26 @@ async function handleInvoicePaymentSucceeded(
 
   // Retrieve the subscription to get userId
   const subscription = await getStripe().subscriptions.retrieve(subscriptionId);
-  const userId = subscription.metadata?.userId;
+  const userId = await getUserIdFromSubscription(subscription);
   
   if (!userId) {
-    console.error('No userId in subscription metadata');
+    console.error('No userId found in subscription or customer metadata');
     return;
   }
 
   // Ensure subscription is marked as paid
-  await updateStripeSubscription(userId, subscriptionId, true);
+  const supabase = createSupabaseServerClient();
+  const { error } = await supabase
+    .from('profiles')
+    .update({
+      is_paid: true,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', userId);
+
+  if (error) {
+    console.error('Error updating profile for invoice payment succeeded:', error);
+  }
 }
 
 /**
@@ -145,25 +219,39 @@ async function handleInvoicePaymentFailed(
     return;
   }
 
-  // Retrieve the subscription to get userId
+  // Retrieve the subscription to get userId and status
   const subscription = await getStripe().subscriptions.retrieve(subscriptionId);
-  const userId = subscription.metadata?.userId;
+  const userId = await getUserIdFromSubscription(subscription);
   
   if (!userId) {
-    console.error('No userId in subscription metadata');
+    console.error('No userId found in subscription or customer metadata');
     return;
   }
 
   // Mark subscription as unpaid if payment failed
-  // You might want to handle this differently based on your business logic
-  const subscriptionStatus = await getStripe().subscriptions.retrieve(subscriptionId);
-  const isPaid = subscriptionStatus.status === 'active' || subscriptionStatus.status === 'trialing';
+  // Check subscription status - if it's past_due or unpaid, mark as unpaid
+  const isPaid = subscription.status === 'active' || subscription.status === 'trialing';
   
-  await updateStripeSubscription(userId, subscriptionId, isPaid);
+  const supabase = createSupabaseServerClient();
+  const { error } = await supabase
+    .from('profiles')
+    .update({
+      is_paid: isPaid,
+      updated_at: new Date().toISOString(),
+      // If subscription is past_due, keep subscription but mark as unpaid
+      ...(subscription.status === 'past_due' && {
+        plan_type: 'free',
+      }),
+    })
+    .eq('id', userId);
+
+  if (error) {
+    console.error('Error updating profile for invoice payment failed:', error);
+  }
 }
 
 /**
- * Handles checkout session completed (for one-time payments)
+ * Handles checkout session completed (for one-time payments and initial subscription setup)
  */
 async function handleCheckoutSessionCompleted(
   session: Stripe.Checkout.Session
@@ -179,16 +267,28 @@ async function handleCheckoutSessionCompleted(
     : session.customer?.id;
 
   if (customerId) {
+    // Update customer ID in database
     await updateStripeCustomerId(userId, customerId);
+    
+    // Also update customer metadata in Stripe to ensure userId is available
+    try {
+      await getStripe().customers.update(customerId, {
+        metadata: {
+          userId,
+        },
+      });
+    } catch (error) {
+      console.error('Error updating customer metadata:', error);
+      // Non-fatal error, continue processing
+    }
   }
 
-  // Check if this is a one-time payment (Starter Plan)
-  // You can identify this by checking the price ID or mode
   const mode = session.mode;
+  
   if (mode === 'payment') {
     // One-time payment - Starter Plan
     const supabase = createSupabaseServerClient();
-    await supabase
+    const { error } = await supabase
       .from('profiles')
       .update({
         is_paid: true,
@@ -199,6 +299,15 @@ async function handleCheckoutSessionCompleted(
         updated_at: new Date().toISOString(),
       })
       .eq('id', userId);
+
+    if (error) {
+      console.error('Error updating profile for checkout session completed (payment):', error);
+    }
+  } else if (mode === 'subscription') {
+    // Subscription mode - the subscription.created event will handle the details
+    // But we can ensure customer ID is set here
+    // The subscription metadata will be handled by subscription.created webhook
+    console.log('Checkout session completed for subscription - subscription.created event will handle details');
   }
 }
 

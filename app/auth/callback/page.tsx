@@ -1,5 +1,10 @@
 'use client';
 
+// This page runs entirely on the client and should not be statically pre-rendered.
+// Mark it as dynamic to avoid build-time data collection issues.
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
+
 import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createSupabaseClient } from '@/lib/supabase/supabaseClient';

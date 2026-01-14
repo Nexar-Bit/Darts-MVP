@@ -94,13 +94,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // TODO: Here you would:
-    // 1. Upload the video to storage (Supabase Storage, S3, etc.)
-    // 2. Process the video with your AI analysis service
-    // 3. Store the analysis results in the database
-    // 4. Return the analysis results
-
-    // Increment the usage count (this also checks limits)
+    // Increment the usage count BEFORE processing (this also checks limits)
+    // This prevents users from submitting multiple requests if they're at their limit
     const { profile: updatedProfile, error: updateError } = await incrementAnalysisCount(user.id);
 
     if (updateError) {
@@ -122,23 +117,126 @@ export async function POST(request: NextRequest) {
       ? (updatedProfile.analysis_limit || 0) - (updatedProfile.analysis_count || 0)
       : remaining - 1;
 
-    // Simulate processing (remove this in production)
-    // In production, you would:
-    // - Upload to storage
-    // - Queue for processing
-    // - Return a job ID or analysis ID
-    const analysisId = `analysis_${Date.now()}_${user.id}`;
+    // Get AI backend URL from environment variables
+    const aiBackendUrl = process.env.AI_BACKEND_URL || process.env.NEXT_PUBLIC_AI_BACKEND_URL;
+    
+    if (!aiBackendUrl) {
+      console.warn('AI_BACKEND_URL not configured, using mock response');
+      // Return mock response if backend is not configured
+      const analysisId = `analysis_${Date.now()}_${user.id}`;
+      return NextResponse.json({
+        success: true,
+        message: 'Analysis submitted successfully',
+        analysisId,
+        remaining: newRemaining,
+        status: 'completed',
+        results: {
+          id: analysisId,
+          timestamp: new Date().toISOString(),
+          insights: [
+            'Release angle: 45° (optimal)',
+            'Follow-through: Good extension',
+            'Wrist position: Slight adjustment needed',
+            'Stance: Balanced and stable',
+          ],
+          recommendations: [
+            'Focus on maintaining consistent release angle',
+            'Work on wrist snap timing',
+            'Continue practicing follow-through',
+          ],
+          metrics: {
+            releaseAngle: 45,
+            followThroughScore: 8.5,
+            stanceScore: 9.0,
+            overallScore: 8.7,
+          },
+        },
+      });
+    }
 
-    return NextResponse.json({
-      success: true,
-      message: 'Analysis submitted successfully',
-      analysisId,
-      remaining: newRemaining,
-      // In production, you might return:
-      // - analysisId: for tracking
-      // - status: 'processing' | 'completed'
-      // - resultsUrl: URL to view results
-    });
+    // Proxy to AI backend
+    try {
+      // Create FormData for backend
+      // Convert File to buffer for transmission
+      const arrayBuffer = await videoFile.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      
+      // Create FormData for backend
+      // Use native FormData (available in Node.js 18+)
+      // Create a File-like object from buffer
+      const backendFormData = new FormData();
+      
+      // Append file as Blob (FormData accepts Blob in Node.js 18+)
+      const blob = new Blob([buffer], { type: videoFile.type });
+      backendFormData.append('video', blob, videoFile.name);
+      backendFormData.append('userId', user.id);
+      backendFormData.append('userEmail', user.email || '');
+
+      // Forward request to AI backend
+      const backendResponse = await fetch(`${aiBackendUrl}/analyze`, {
+        method: 'POST',
+        headers: {
+          // Forward authorization if backend requires it
+          ...(process.env.AI_BACKEND_API_KEY && {
+            'X-API-Key': process.env.AI_BACKEND_API_KEY,
+          }),
+        },
+        body: backendFormData,
+      });
+
+      if (!backendResponse.ok) {
+        const errorData = await backendResponse.json().catch(() => ({ error: 'Backend error' }));
+        console.error('AI backend error:', errorData);
+        
+        // Rollback the analysis count increment on backend error
+        // Note: In production, you might want to use a transaction or queue system
+        const supabaseServer = createSupabaseServerClient();
+        await supabaseServer
+          .from('profiles')
+          .update({
+            analysis_count: analysisCount, // Revert to previous count
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', user.id);
+
+        return NextResponse.json(
+          { error: errorData.error || 'Failed to process video. Please try again.' },
+          { status: backendResponse.status || 500 }
+        );
+      }
+
+      const backendData = await backendResponse.json();
+
+      // Store analysis results in database (optional)
+      // You might want to create an 'analyses' table to store results
+      // For now, we'll just return the results
+
+      return NextResponse.json({
+        success: true,
+        message: 'Analysis completed successfully',
+        analysisId: backendData.analysisId || `analysis_${Date.now()}_${user.id}`,
+        remaining: newRemaining,
+        status: backendData.status || 'completed',
+        results: backendData.results || backendData,
+      });
+    } catch (backendError: any) {
+      console.error('Error proxying to AI backend:', backendError);
+      
+      // Rollback the analysis count increment on error
+      const supabaseServer = createSupabaseServerClient();
+      await supabaseServer
+        .from('profiles')
+        .update({
+          analysis_count: analysisCount, // Revert to previous count
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', user.id);
+
+      return NextResponse.json(
+        { error: 'Failed to connect to analysis service. Please try again later.' },
+        { status: 503 }
+      );
+    }
   } catch (error) {
     console.error('Error in analyze API:', error);
     return NextResponse.json(
