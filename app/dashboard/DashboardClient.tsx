@@ -61,6 +61,8 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
 
           const data = await response.json();
           
+          console.log('Session verification response:', data);
+          
           if (data.success && data.updated) {
             toast.success(`Successfully activated ${data.planType === 'starter' ? 'Starter' : 'Monthly'} Plan!`);
             
@@ -72,6 +74,35 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
             
             // Remove session_id from URL
             window.history.replaceState({}, '', '/dashboard');
+          } else if (data.success && !data.updated) {
+            // Session verified but not updated - might be processing or webhook already handled it
+            console.log('Session verified but not updated:', data.message);
+            
+            // Wait a moment for webhook to process, then refresh profile
+            setTimeout(async () => {
+              const { profile: updatedProfile } = await getCurrentUserProfile();
+              if (updatedProfile) {
+                setProfile(updatedProfile);
+                // If profile shows as paid now, show success message
+                if (updatedProfile.is_paid) {
+                  toast.success(`Successfully activated ${updatedProfile.plan_type === 'starter' ? 'Starter' : 'Monthly'} Plan!`);
+                }
+              }
+            }, 2000);
+            
+            // Remove session_id from URL
+            window.history.replaceState({}, '', '/dashboard');
+          } else if (data.error) {
+            console.error('Session verification error:', data.error);
+            toast.error(`Failed to verify payment: ${data.error}`);
+            // Still try to refresh profile in case webhook processed it
+            setTimeout(async () => {
+              const { profile: updatedProfile } = await getCurrentUserProfile();
+              if (updatedProfile && updatedProfile.is_paid) {
+                setProfile(updatedProfile);
+                toast.success(`Plan activated!`);
+              }
+            }, 2000);
           }
         } catch (err) {
           console.error('Error verifying session:', err);

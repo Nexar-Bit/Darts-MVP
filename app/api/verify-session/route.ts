@@ -63,8 +63,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if payment was successful
-    if (session.payment_status === 'paid' || session.payment_status === 'unpaid') {
+    // Check session status - for completed sessions
+    const mode = session.mode;
+    const paymentStatus = session.payment_status;
+    const sessionStatus = session.status; // 'complete', 'expired', 'open'
+    
+    console.log('Session verification:', {
+      sessionId,
+      mode,
+      paymentStatus,
+      sessionStatus,
+      userId: user.id,
+    });
+
+    // Only process if session is complete
+    if (sessionStatus === 'complete') {
       // Get user profile
       const supabaseServer = createSupabaseServerClient();
       const { data: profile } = await supabaseServer
@@ -74,47 +87,57 @@ export async function POST(request: NextRequest) {
         .single();
 
       // Determine plan type based on mode
-      const mode = session.mode;
-      const isPaid = session.payment_status === 'paid';
+      const isPaid = paymentStatus === 'paid';
       
-      if (mode === 'payment' && isPaid) {
+      if (mode === 'payment') {
         // One-time payment - Starter Plan
-        const customerId = typeof session.customer === 'string'
-          ? session.customer
-          : session.customer?.id;
+        // Only update if payment is actually paid
+        if (isPaid) {
+          const customerId = typeof session.customer === 'string'
+            ? session.customer
+            : session.customer?.id;
 
-        const updates: any = {
-          is_paid: true,
-          plan_type: 'starter',
-          analysis_limit: 3,
-          analysis_count: 0,
-          plan_purchased_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
+          const updates: any = {
+            is_paid: true,
+            plan_type: 'starter',
+            analysis_limit: 3,
+            analysis_count: 0,
+            plan_purchased_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
 
-        if (customerId) {
-          updates.stripe_customer_id = customerId;
+          if (customerId) {
+            updates.stripe_customer_id = customerId;
+          }
+
+          const { error: updateError } = await supabaseServer
+            .from('profiles')
+            .update(updates)
+            .eq('id', user.id);
+
+          if (updateError) {
+            console.error('Error updating profile:', updateError);
+            return NextResponse.json(
+              { error: 'Failed to update profile', updated: false, details: updateError },
+              { status: 500 }
+            );
+          }
+
+          return NextResponse.json({
+            success: true,
+            updated: true,
+            planType: 'starter',
+            isPaid: true,
+          });
+        } else {
+          // Payment not completed yet
+          return NextResponse.json({
+            success: true,
+            updated: false,
+            message: `Payment status is ${paymentStatus}, waiting for payment to complete`,
+            paymentStatus,
+          });
         }
-
-        const { error: updateError } = await supabaseServer
-          .from('profiles')
-          .update(updates)
-          .eq('id', user.id);
-
-        if (updateError) {
-          console.error('Error updating profile:', updateError);
-          return NextResponse.json(
-            { error: 'Failed to update profile', updated: false },
-            { status: 500 }
-          );
-        }
-
-        return NextResponse.json({
-          success: true,
-          updated: true,
-          planType: 'starter',
-          isPaid: true,
-        });
       } else if (mode === 'subscription') {
         // Subscription - check subscription status
         const subscriptionId = typeof session.subscription === 'string'
@@ -129,6 +152,13 @@ export async function POST(request: NextRequest) {
               : subscription.customer.id;
 
             const isActive = subscription.status === 'active' || subscription.status === 'trialing';
+
+            console.log('Subscription details:', {
+              subscriptionId,
+              status: subscription.status,
+              isActive,
+              customerId,
+            });
 
             const updates: any = {
               is_paid: isActive,
@@ -145,41 +175,54 @@ export async function POST(request: NextRequest) {
               updates.stripe_customer_id = customerId;
             }
 
-            const { error: updateError } = await supabaseServer
+            const { error: updateError, data: updatedProfile } = await supabaseServer
               .from('profiles')
               .update(updates)
-              .eq('id', user.id);
+              .eq('id', user.id)
+              .select()
+              .single();
 
             if (updateError) {
               console.error('Error updating profile:', updateError);
               return NextResponse.json(
-                { error: 'Failed to update profile', updated: false },
+                { error: 'Failed to update profile', updated: false, details: updateError },
                 { status: 500 }
               );
             }
+
+            console.log('Profile updated successfully:', updatedProfile);
 
             return NextResponse.json({
               success: true,
               updated: true,
               planType: 'monthly',
               isPaid: isActive,
+              subscriptionStatus: subscription.status,
             });
-          } catch (error) {
+          } catch (error: any) {
             console.error('Error retrieving subscription:', error);
             return NextResponse.json(
-              { error: 'Failed to verify subscription', updated: false },
+              { error: 'Failed to verify subscription', updated: false, details: error.message },
               { status: 500 }
             );
           }
+        } else {
+          return NextResponse.json({
+            success: true,
+            updated: false,
+            message: 'No subscription ID found in session',
+          });
         }
       }
     }
 
-    // Payment not completed yet
+    // Session not complete or payment not successful
     return NextResponse.json({
       success: true,
       updated: false,
-      message: 'Payment is still processing',
+      message: `Session status: ${sessionStatus}, Payment status: ${paymentStatus}`,
+      sessionStatus,
+      paymentStatus,
     });
   } catch (error) {
     console.error('Error in verify-session:', error);
