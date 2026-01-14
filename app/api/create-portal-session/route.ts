@@ -49,8 +49,34 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Build return URL
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    // Build return URL - use environment variable, request origin, or fallback
+    let baseUrl = process.env.NEXT_PUBLIC_APP_URL;
+    
+    // If not set, try to get from request headers (for Vercel deployments)
+    if (!baseUrl) {
+      const origin = request.headers.get('origin') || request.headers.get('host');
+      if (origin) {
+        // Handle both full URLs and host headers
+        baseUrl = origin.startsWith('http') ? origin : `https://${origin}`;
+      } else {
+        baseUrl = 'http://localhost:3000'; // Fallback for local development
+      }
+    }
+    
+    // Ensure baseUrl doesn't end with a slash
+    baseUrl = baseUrl.replace(/\/$/, '');
+    
+    // Validate URL format
+    try {
+      new URL(baseUrl);
+    } catch {
+      console.error('Invalid baseUrl:', baseUrl);
+      return NextResponse.json(
+        { error: 'Invalid application URL configuration' },
+        { status: 500 }
+      );
+    }
+    
     const returnUrl = `${baseUrl}/dashboard/billing`;
 
     // Create portal session
