@@ -50,7 +50,7 @@ export default function ProfilePage() {
   const handleSignOut = async () => {
     const supabase = createSupabaseClient();
     await supabase.auth.signOut();
-    router.push('/login');
+    router.push('/login', { scroll: false });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {

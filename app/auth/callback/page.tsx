@@ -36,7 +36,7 @@ function AuthCallbackContent() {
           toast.error(errorDescription || error || 'Authentication failed');
           
           setTimeout(() => {
-            router.push('/login');
+            router.push('/login', { scroll: false });
           }, 3000);
           return;
         }
@@ -67,7 +67,7 @@ function AuthCallbackContent() {
             // Redirect to dashboard or next URL
             const next = searchParams.get('next') || '/dashboard';
             setTimeout(() => {
-              router.push(next);
+              router.push(next, { scroll: false });
               router.refresh();
             }, 1500);
             return;
@@ -83,7 +83,7 @@ function AuthCallbackContent() {
           
           const next = searchParams.get('next') || '/dashboard';
           setTimeout(() => {
-            router.push(next);
+            router.push(next, { scroll: false });
             router.refresh();
           }, 1500);
           return;

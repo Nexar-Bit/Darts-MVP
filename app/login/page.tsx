@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { signIn } from '@/lib/supabase/auth';
 import Button from '@/components/ui/Button';
@@ -9,8 +9,9 @@ import Input from '@/components/ui/Input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import { useToast, ToastContainer } from '@/components/ui/Toast';
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const toast = useToast();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -92,11 +93,16 @@ export default function LoginPage() {
 
       if (user && session) {
         toast.success('Successfully signed in! Redirecting...', 2000);
-        // Small delay to show success message
+        // Wait a bit longer to ensure session is persisted
+        // Use window.location for a full page reload to ensure session is available
         setTimeout(() => {
-          router.push('/dashboard');
-          router.refresh();
-        }, 500);
+          // Check for redirect parameter
+          const redirectTo = searchParams.get('redirect') || '/dashboard';
+          window.location.href = redirectTo;
+        }, 1000);
+      } else {
+        // If no session, set loading to false
+        setIsLoading(false);
       }
     } catch (error) {
       console.error('Login error:', error);
@@ -197,5 +203,20 @@ export default function LoginPage() {
       </div>
     </div>
     </>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="flex flex-col items-center space-y-4">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
+          <p className="text-sm text-gray-600">Loading...</p>
+        </div>
+      </div>
+    }>
+      <LoginForm />
+    </Suspense>
   );
 }

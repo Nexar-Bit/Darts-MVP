@@ -49,7 +49,7 @@ export default function AnalyzePage() {
   const handleSignOut = async () => {
     const supabase = createSupabaseClient();
     await supabase.auth.signOut();
-    router.push('/login');
+    router.push('/login', { scroll: false });
   };
 
   const checkUsageLimit = (): { canAnalyze: boolean; message: string } => {
@@ -182,7 +182,7 @@ export default function AnalyzePage() {
       
       // Redirect to results or dashboard after a delay
       setTimeout(() => {
-        router.push('/dashboard');
+        router.push('/dashboard', { scroll: false });
         router.refresh();
       }, 2000);
     } catch (error: any) {
@@ -210,7 +210,7 @@ export default function AnalyzePage() {
     : 0;
 
   return (
-    <ProtectedRoute>
+    <ProtectedRoute requirePaid={true}>
       <DashboardLayout
         user={user ? { email: user.email || undefined } : null}
         onSignOut={handleSignOut}

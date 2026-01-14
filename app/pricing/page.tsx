@@ -70,7 +70,7 @@ export default function PricingPage() {
   const handleCheckout = async (plan: PricingPlan) => {
     // Check if user is authenticated
     if (!isAuthenticated) {
-      router.push('/signup?redirect=/pricing');
+      router.push('/signup?redirect=/pricing', { scroll: false });
       return;
     }
 
@@ -81,7 +81,7 @@ export default function PricingPage() {
       const { data: { session } } = await supabase.auth.getSession();
 
       if (!session) {
-        router.push('/login?redirect=/pricing');
+        router.push('/login?redirect=/pricing', { scroll: false });
         return;
       }
 

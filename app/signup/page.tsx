@@ -118,7 +118,7 @@ export default function SignupPage() {
           // Email confirmation disabled - user is immediately signed in
           toast.success('Account created successfully! Redirecting to dashboard...', 2000);
           setTimeout(() => {
-            router.push('/dashboard');
+            router.push('/dashboard', { scroll: false });
             router.refresh();
           }, 1500);
         } else {

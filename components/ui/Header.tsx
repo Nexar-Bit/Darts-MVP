@@ -41,7 +41,7 @@ const Header: React.FC = () => {
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     setUser(null);
-    router.push('/login');
+    router.push('/login', { scroll: false });
   };
 
   const toggleMobileMenu = () => {

@@ -16,15 +16,21 @@ export interface SignInCredentials {
 
 /**
  * Gets the app URL for redirects (works in both client and server contexts)
+ * Priority: Environment variable > window.location.origin > localhost fallback
  */
 function getAppUrl(): string {
-  // Client-side: use window.location.origin
+  // Always prioritize environment variable (set in Vercel for production)
+  if (process.env.NEXT_PUBLIC_APP_URL) {
+    return process.env.NEXT_PUBLIC_APP_URL;
+  }
+  
+  // Client-side: use window.location.origin as fallback
   if (typeof window !== 'undefined') {
     return window.location.origin;
   }
   
-  // Server-side: use environment variable or fallback
-  return process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+  // Server-side fallback
+  return 'http://localhost:3000';
 }
 
 /**
