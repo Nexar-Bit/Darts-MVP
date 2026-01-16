@@ -158,13 +158,46 @@ If you're using production Stripe:
 
 ## ✅ Step 4: Verify Deployment
 
-### 4.1 Test the Application
+### 4.1 Test in Preview Environment
+
+Before deploying to production, test in preview:
+
+1. **Create a Pull Request**
+   ```bash
+   git checkout -b test-preview
+   git push origin test-preview
+   ```
+
+2. **Vercel creates preview deployment**
+   - Preview URL shared in PR comments
+   - Use test Stripe keys for preview
+   - Test all features in preview environment
+
+3. **Preview Testing Checklist**
+   - [ ] Homepage loads
+   - [ ] Sign up/login works
+   - [ ] Dashboard accessible
+   - [ ] Pricing page displays
+   - [ ] Checkout flow works (test cards)
+   - [ ] Video upload works
+   - [ ] Analysis job creation works
+   - [ ] Results display correctly
+   - [ ] No console errors
+   - [ ] No build errors
+
+4. **Merge to Production**
+   - Once preview tests pass, merge PR
+   - Production deployment triggers automatically
+
+### 4.2 Test the Application (Production)
 
 1. Visit your Vercel URL: `https://your-project.vercel.app`
 2. Test signup/login flow
 3. Test pricing page
 4. Test checkout flow (use Stripe test cards)
 5. Test webhook (trigger a test event from Stripe Dashboard)
+6. Test video upload and analysis
+7. Verify subscription status updates
 
 ### 4.2 Check Logs
 
@@ -201,6 +234,31 @@ Vercel automatically deploys on every push to your main branch:
 - Every pull request gets a preview deployment
 - Preview URLs are shared automatically in PR comments
 - Use test Stripe keys for preview deployments
+
+#### Testing Preview Deployments
+
+1. **Environment Variables**
+   - Preview deployments use Preview environment variables
+   - Set test Stripe keys for Preview environment
+   - Use test Supabase project (optional)
+
+2. **Testing Checklist**
+   - [ ] All features work in preview
+   - [ ] No console errors
+   - [ ] API routes respond correctly
+   - [ ] Authentication works
+   - [ ] Payments work (test mode)
+   - [ ] Webhooks work (if configured)
+
+3. **Preview URL Format**
+   - `https://your-project-git-branch-username.vercel.app`
+   - Each PR gets unique URL
+   - URL persists until PR is closed/merged
+
+4. **Preview Limitations**
+   - Preview deployments may have slower cold starts
+   - Some features may require production environment
+   - Test thoroughly before merging to production
 
 ## 🛠️ Troubleshooting
 

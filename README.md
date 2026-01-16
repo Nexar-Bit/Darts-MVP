@@ -41,6 +41,8 @@ Before you begin, ensure you have:
    ```
    
    Then edit `.env.local` and fill in all the required values (see [Environment Variables](#environment-variables) section below).
+   
+   For detailed environment setup instructions, see [ENV_SETUP.md](./ENV_SETUP.md).
 
 4. **Set up Supabase**
    - Create a new Supabase project at [supabase.com](https://supabase.com)
@@ -73,6 +75,11 @@ Create a `.env.local` file in the root directory with the following variables:
 # Application URL
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 
+# API Configuration
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+# For production, set to your AI backend URL:
+# NEXT_PUBLIC_API_BASE_URL=https://your-ai-backend.com
+
 # Supabase
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
@@ -90,9 +97,14 @@ STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret
 
 ```env
 # AI Backend (optional - uses mock responses if not set)
-AI_BACKEND_URL=https://your-ai-backend.com
-AI_BACKEND_API_KEY=your_api_key
+# If not set, the app will create jobs but won't process them until backend is configured
+AI_BACKEND_URL=http://localhost:8000
+# For production:
+# AI_BACKEND_URL=https://your-ai-backend.com
+AI_BACKEND_API_KEY=your_ai_backend_api_key_if_required
 ```
+
+**Note:** `NEXT_PUBLIC_API_BASE_URL` is used by the frontend to construct API URLs. `AI_BACKEND_URL` is used by server-side API routes to proxy requests to your AI backend.
 
 See `.env.example` for a complete template with descriptions.
 
@@ -196,6 +208,7 @@ The `profiles` table includes:
 │   ├── layout/           # Layout components
 │   └── ui/               # UI components
 ├── lib/                   # Utility libraries
+│   ├── api/              # API client configuration
 │   ├── supabase/         # Supabase client and helpers
 │   └── stripe/           # Stripe integration
 ├── supabase/              # Database migrations
@@ -230,10 +243,27 @@ stripe trigger checkout.session.completed
 
 ## 📝 API Endpoints
 
-- `POST /api/analyze` - Upload and analyze video
+### Application API Routes
+
+- `POST /api/analyze` - Upload and analyze video (creates job)
+- `GET /api/jobs` - List user's analysis jobs
+- `GET /api/jobs/[jobId]` - Get job status and results
+- `GET /api/health` - Health check endpoint
 - `POST /api/webhook` - Stripe webhook handler
 - `POST /api/create-checkout-session` - Create Stripe checkout
 - `POST /api/create-portal-session` - Create Stripe customer portal
+
+### AI Backend API (External)
+
+The application expects an AI backend at `NEXT_PUBLIC_API_BASE_URL` with:
+
+- `POST /analyze?model={model}` - Process video analysis
+  - Accepts `side_video` and/or `front_video` files
+  - Accepts `user_id` and `job_id` parameters
+  - Should update job status in Supabase `jobs` table
+  - Returns analysis results
+
+See `lib/api/client.ts` for API client configuration.
 
 ## 🐛 Troubleshooting
 

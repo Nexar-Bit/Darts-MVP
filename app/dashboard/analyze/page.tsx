@@ -1,28 +1,54 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { createSupabaseClient } from '@/lib/supabase/supabaseClient';
 import { getCurrentUserProfile } from '@/lib/supabase/database';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
-import { Upload, Video, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
+import { AlertCircle, RefreshCw } from 'lucide-react';
 import { useToast, ToastContainer } from '@/components/ui/Toast';
 import Link from 'next/link';
 import type { User } from '@supabase/supabase-js';
 import type { UserProfile } from '@/lib/supabase/database';
+import UploadCard, { validateUploadFile } from '@/components/dashboard/UploadCard';
+import StatusBadge from '@/components/dashboard/StatusBadge';
+import EmptyState from '@/components/dashboard/EmptyState';
+import RecentResults from '@/components/dashboard/RecentResults';
+import { uploadVideo, getUserJobs } from '@/lib/api';
 
-export default function AnalyzePage() {
+interface JobListItem {
+  job_id: string;
+  user_id: string;
+  created_at_unix: number;
+  original_filename?: string | null;
+  status: 'queued' | 'running' | 'done' | 'failed';
+  progress?: number | null;
+  stage?: string | null;
+  error_message?: string | null;
+  throws_detected?: number | null;
+}
+
+function fmtDate(unixSeconds: number) {
+  const d = new Date(unixSeconds * 1000);
+  return d.toLocaleString();
+}
+
+function AnalyzePageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const toast = useToast();
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [dragActive, setDragActive] = useState(false);
+  const [sideFile, setSideFile] = useState<File | null>(null);
+  const [frontFile, setFrontFile] = useState<File | null>(null);
+  const [jobs, setJobs] = useState<JobListItem[]>([]);
+  const [listLoading, setListLoading] = useState(false);
+  const [listErr, setListErr] = useState('');
 
   useEffect(() => {
     const loadUserData = async () => {
@@ -46,11 +72,33 @@ export default function AnalyzePage() {
     loadUserData();
   }, []);
 
+  useEffect(() => {
+    if (user) {
+      loadJobs();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
   const handleSignOut = async () => {
     const supabase = createSupabaseClient();
     await supabase.auth.signOut();
     router.push('/login', { scroll: false });
   };
+
+  async function loadJobs() {
+    if (!user) return;
+    
+    setListErr('');
+    setListLoading(true);
+    try {
+      const jobsList = await getUserJobs(user.id, 100);
+      setJobs(jobsList);
+    } catch (e: any) {
+      setListErr(e?.message || 'Failed to load jobs');
+    } finally {
+      setListLoading(false);
+    }
+  }
 
   const checkUsageLimit = (): { canAnalyze: boolean; message: string } => {
     if (!profile) {
@@ -77,60 +125,21 @@ export default function AnalyzePage() {
     return { canAnalyze: true, message: '' };
   };
 
-  const handleFileSelect = (file: File) => {
-    // Validate file type
-    const validTypes = ['video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo', 'video/webm'];
-    if (!validTypes.includes(file.type)) {
-      toast.error('Please upload a valid video file (MP4, MOV, AVI, or WebM)');
-      return;
-    }
+  function openDetail(jobId: string) {
+    router.push(`/dashboard/analyze/${jobId}`);
+  }
 
-    // Validate file size (max 100MB)
-    const maxSize = 100 * 1024 * 1024; // 100MB
-    if (file.size > maxSize) {
-      toast.error('File size must be less than 100MB');
-      return;
-    }
-
-    setSelectedFile(file);
-    toast.success('Video file selected');
-  };
-
-  const handleDrag = (e: React.DragEvent) => {
+  async function startUpload(e: React.FormEvent) {
     e.preventDefault();
-    e.stopPropagation();
-    if (e.type === 'dragenter' || e.type === 'dragover') {
-      setDragActive(true);
-    } else if (e.type === 'dragleave') {
-      setDragActive(false);
-    }
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFileSelect(e.dataTransfer.files[0]);
-    }
-  };
-
-  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      handleFileSelect(e.target.files[0]);
-    }
-  };
-
-  const handleSubmit = async () => {
+    
     const { canAnalyze, message } = checkUsageLimit();
     if (!canAnalyze) {
       toast.error(message);
       return;
     }
 
-    if (!selectedFile) {
-      toast.error('Please select a video file to analyze');
+    if (!sideFile && !frontFile) {
+      toast.error('Upload at least one video: side-on and/or front-on.');
       return;
     }
 
@@ -143,55 +152,32 @@ export default function AnalyzePage() {
     toast.info('Uploading video and starting analysis...');
 
     try {
-      const supabase = createSupabaseClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session?.access_token) {
-        toast.error('Not authenticated');
-        setUploading(false);
-        return;
+      // Validate again
+      if (sideFile) {
+        const v = await validateUploadFile(sideFile);
+        if (!v.ok) throw new Error(`Side-on: ${v.message}`);
+      }
+      if (frontFile) {
+        const v = await validateUploadFile(frontFile);
+        if (!v.ok) throw new Error(`Front-on: ${v.message}`);
       }
 
-      // Create FormData for file upload
-      const formData = new FormData();
-      formData.append('video', selectedFile);
-      formData.append('userId', user.id);
-
-      const response = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: formData,
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to submit analysis');
-      }
-
-      toast.success('Analysis submitted successfully! Processing your throw...');
+      // Upload using API client
+      const result = await uploadVideo(sideFile || null, frontFile || null, user.id);
       
-      // Refresh profile to update analysis count
-      const { profile: updatedProfile } = await getCurrentUserProfile();
-      setProfile(updatedProfile);
-      
-      // Reset file selection
-      setSelectedFile(null);
-      
-      // Redirect to results or dashboard after a delay
-      setTimeout(() => {
-        router.push('/dashboard', { scroll: false });
-        router.refresh();
-      }, 2000);
-    } catch (error: any) {
-      console.error('Error submitting analysis:', error);
-      toast.error(error.message || 'Failed to submit analysis. Please try again.');
+      toast.success('Upload complete. Starting analysis…');
+      setSideFile(null);
+      setFrontFile(null);
+
+      await loadJobs();
+      openDetail(result.job_id);
+    } catch (e: any) {
+      console.error('Upload error:', e);
+      toast.error(e?.message || 'Upload failed.');
     } finally {
       setUploading(false);
     }
-  };
+  }
 
   if (loading) {
     return (
@@ -220,7 +206,9 @@ export default function AnalyzePage() {
           {/* Header */}
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Analyze Throw</h1>
-            <p className="text-gray-600 mt-2">Upload a video of your throw for AI analysis</p>
+            <p className="text-gray-600 mt-2">
+              Upload side-on and/or front-on. Get a drill-based coaching plan and an overlay video to review mechanics.
+            </p>
           </div>
 
           {/* Usage Status */}
@@ -255,90 +243,63 @@ export default function AnalyzePage() {
           {canAnalyze ? (
             <Card>
               <CardHeader>
-                <CardTitle>Upload Video</CardTitle>
-                <CardDescription>
-                  Upload a video file of your throw (MP4, MOV, AVI, or WebM, max 100MB)
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                {/* Drag and Drop Area */}
-                <div
-                  onDragEnter={handleDrag}
-                  onDragLeave={handleDrag}
-                  onDragOver={handleDrag}
-                  onDrop={handleDrop}
-                  className={`border-2 border-dashed rounded-lg p-12 text-center transition-colors ${
-                    dragActive
-                      ? 'border-blue-500 bg-blue-50'
-                      : selectedFile
-                      ? 'border-green-500 bg-green-50'
-                      : 'border-gray-300 bg-gray-50 hover:border-gray-400'
-                  }`}
-                >
-                  {selectedFile ? (
-                    <div className="space-y-4">
-                      <CheckCircle className="h-12 w-12 text-green-600 mx-auto" />
-                      <div>
-                        <p className="text-lg font-medium text-gray-900">{selectedFile.name}</p>
-                        <p className="text-sm text-gray-500">
-                          {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB
-                        </p>
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setSelectedFile(null)}
-                      >
-                        Remove File
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <Upload className="h-12 w-12 text-gray-400 mx-auto" />
-                      <div>
-                        <p className="text-lg font-medium text-gray-900">
-                          Drag and drop your video here
-                        </p>
-                        <p className="text-sm text-gray-500">or</p>
-                      </div>
-                      <label htmlFor="video-upload" className="cursor-pointer">
-                        <Button variant="outline" type="button">
-                          Browse Files
-                        </Button>
-                        <input
-                          id="video-upload"
-                          type="file"
-                          accept="video/*"
-                          onChange={handleFileInputChange}
-                          className="hidden"
-                          disabled={uploading}
-                        />
-                      </label>
-                    </div>
-                  )}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Upload your videos</CardTitle>
+                    <CardDescription className="mt-2">
+                      You can upload <strong>side-on</strong>, <strong>front-on</strong>, or <strong>both</strong>. 
+                      If you upload both, we combine them into one scorecard and one plan.
+                      <br />
+                      Limits: max 70s per video, max 400MB per video.
+                    </CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {(sideFile || frontFile) ? (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-800">
+                        Ready
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-800">
+                        Choose file(s)
+                      </span>
+                    )}
+                  </div>
                 </div>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={startUpload}>
+                  <div className="grid gap-4">
+                    <UploadCard
+                      label="Side-on video (recommended)"
+                      hint="Best for elbow path, tempo, and release-line mechanics."
+                      file={sideFile}
+                      setFile={setSideFile}
+                      busy={uploading}
+                      validate={validateUploadFile}
+                    />
 
-                {/* Submit Button */}
-                <Button
-                  variant="primary"
-                  size="lg"
-                  className="w-full"
-                  onClick={handleSubmit}
-                  disabled={!selectedFile || uploading}
-                  isLoading={uploading}
-                >
-                  {uploading ? (
-                    <>
-                      <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                      Uploading and Processing...
-                    </>
-                  ) : (
-                    <>
-                      <Video className="mr-2 h-5 w-5" />
-                      Submit for Analysis
-                    </>
-                  )}
-                </Button>
+                    <UploadCard
+                      label="Front-on video (optional)"
+                      hint="Best for sway, alignment, and shoulder/hip drift."
+                      file={frontFile}
+                      setFile={setFrontFile}
+                      busy={uploading}
+                      validate={validateUploadFile}
+                    />
+                  </div>
+
+                  <div className="mt-4">
+                    <Button
+                      variant="primary"
+                      size="lg"
+                      className="w-full"
+                      type="submit"
+                      disabled={uploading || (!sideFile && !frontFile)}
+                    >
+                      {uploading ? 'Uploading...' : 'Analyse video(s)'}
+                    </Button>
+                  </div>
+                </form>
               </CardContent>
             </Card>
           ) : (
@@ -367,38 +328,99 @@ export default function AnalyzePage() {
             </Card>
           )}
 
-          {/* Instructions */}
+          {/* Jobs List */}
           <Card>
             <CardHeader>
-              <CardTitle>How to Record Your Throw</CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle>My analyses</CardTitle>
+                <Button variant="outline" size="sm" onClick={loadJobs} disabled={listLoading}>
+                  <RefreshCw className={`h-4 w-4 mr-2 ${listLoading ? 'animate-spin' : ''}`} />
+                  {listLoading ? 'Refreshing...' : 'Refresh'}
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
-              <ul className="space-y-3 text-gray-700">
-                <li className="flex items-start">
-                  <span className="mr-2">•</span>
-                  <span>Record from a side angle to capture your full throwing motion</span>
-                </li>
-                <li className="flex items-start">
-                  <span className="mr-2">•</span>
-                  <span>Ensure good lighting so your form is clearly visible</span>
-                </li>
-                <li className="flex items-start">
-                  <span className="mr-2">•</span>
-                  <span>Keep the camera steady or use a tripod for best results</span>
-                </li>
-                <li className="flex items-start">
-                  <span className="mr-2">•</span>
-                  <span>Record the entire throw from start to finish</span>
-                </li>
-                <li className="flex items-start">
-                  <span className="mr-2">•</span>
-                  <span>File formats: MP4, MOV, AVI, or WebM (max 100MB)</span>
-                </li>
-              </ul>
+              {listErr ? (
+                <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+                  {listErr}
+                </div>
+              ) : null}
+
+              {jobs.length === 0 && !listLoading ? (
+                <EmptyState
+                  title="No analyses yet"
+                  subtitle="Upload a throw video to generate your first report."
+                  action={
+                    <Button variant="primary" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
+                      Upload video
+                    </Button>
+                  }
+                />
+              ) : null}
+
+              {listLoading && jobs.length === 0 ? (
+                <p className="text-sm text-gray-500 text-center py-8">Loading…</p>
+              ) : null}
+
+              {jobs.length > 0 ? (
+                <div className="space-y-2">
+                  {jobs.map((j) => (
+                    <button
+                      key={j.job_id}
+                      type="button"
+                      className="w-full text-left border border-gray-200 rounded-lg p-4 bg-white hover:bg-gray-50 transition-colors"
+                      onClick={() => openDetail(j.job_id)}
+                      title="Open this job"
+                    >
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-semibold text-gray-900 truncate">
+                            {j.original_filename || '(unknown)'}
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            Last analysed: {fmtDate(j.created_at_unix)}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 flex-shrink-0">
+                          <StatusBadge status={j.status} />
+                          {j.status === 'running' && typeof j.progress === 'number' ? (
+                            <span className="text-xs text-gray-500">
+                              {Math.round((j.progress || 0) * 100)}%
+                            </span>
+                          ) : null}
+                          {typeof j.throws_detected === 'number' ? (
+                            <span className="text-xs text-gray-500 min-w-[60px] text-right">
+                              {j.throws_detected} throws
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                      {j.status === 'failed' && j.error_message ? (
+                        <div className="text-xs text-red-600 mt-2">{j.error_message}</div>
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </CardContent>
           </Card>
         </div>
       </DashboardLayout>
     </ProtectedRoute>
+  );
+}
+
+export default function AnalyzePage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="flex flex-col items-center space-y-4">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
+          <p className="text-sm text-gray-600">Loading...</p>
+        </div>
+      </div>
+    }>
+      <AnalyzePageContent />
+    </Suspense>
   );
 }

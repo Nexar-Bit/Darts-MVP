@@ -11,6 +11,10 @@ export interface Toast {
   message: string;
   type: ToastType;
   duration?: number;
+  action?: {
+    label: string;
+    onClick: () => void;
+  };
 }
 
 interface ToastProps {
@@ -54,7 +58,17 @@ const ToastComponent: React.FC<ToastProps> = ({ toast, onClose }) => {
       role="alert"
     >
       <Icon className="h-5 w-5 flex-shrink-0 mt-0.5" />
-      <p className="flex-1 text-sm font-medium">{toast.message}</p>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium">{toast.message}</p>
+        {toast.action && (
+          <button
+            onClick={toast.action.onClick}
+            className="mt-2 text-xs font-semibold underline hover:no-underline"
+          >
+            {toast.action.label}
+          </button>
+        )}
+      </div>
       <button
         onClick={() => onClose(toast.id)}
         className="flex-shrink-0 text-gray-400 hover:text-gray-600 transition-colors"
@@ -89,12 +103,26 @@ export const ToastContainer: React.FC<ToastContainerProps> = ({ toasts, onClose 
 export function useToast() {
   const [toasts, setToasts] = React.useState<Toast[]>([]);
 
-  const showToast = React.useCallback((message: string, type: ToastType = 'info', duration: number = 5000) => {
+  const showToast = React.useCallback((
+    message: string,
+    type: ToastType = 'info',
+    duration: number = 5000,
+    action?: { label: string; onClick: () => void }
+  ) => {
     const id = Math.random().toString(36).substring(2, 9);
-    const newToast: Toast = { id, message, type, duration };
+    const newToast: Toast = { id, message, type, duration, action };
     setToasts((prev) => [...prev, newToast]);
     return id;
   }, []);
+
+  const showToastWithAction = React.useCallback((
+    message: string,
+    action: { label: string; onClick: () => void },
+    type: ToastType = 'info',
+    duration: number = 10000
+  ) => {
+    return showToast(message, type, duration, action);
+  }, [showToast]);
 
   const removeToast = React.useCallback((id: string) => {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
@@ -105,14 +133,29 @@ export function useToast() {
   const warning = React.useCallback((message: string, duration?: number) => showToast(message, 'warning', duration), [showToast]);
   const info = React.useCallback((message: string, duration?: number) => showToast(message, 'info', duration), [showToast]);
 
+  const successWithAction = React.useCallback((
+    message: string,
+    action: { label: string; onClick: () => void },
+    duration?: number
+  ) => showToastWithAction(message, action, 'success', duration), [showToastWithAction]);
+
+  const errorWithAction = React.useCallback((
+    message: string,
+    action: { label: string; onClick: () => void },
+    duration?: number
+  ) => showToastWithAction(message, action, 'error', duration), [showToastWithAction]);
+
   return {
     toasts,
     showToast,
+    showToastWithAction,
     removeToast,
     success,
     error,
     warning,
     info,
+    successWithAction,
+    errorWithAction,
   };
 }
 

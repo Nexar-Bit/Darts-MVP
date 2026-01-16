@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createSupabaseClient } from '@/lib/supabase/supabaseClient';
@@ -9,10 +9,17 @@ import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
-import Input from '@/components/ui/Input';
-import { Upload, Video, AlertCircle, CheckCircle, Loader2, FileText, X } from 'lucide-react';
+import { Upload, Video, AlertCircle, CheckCircle, Loader2, RefreshCw } from 'lucide-react';
 import { useToast, ToastContainer } from '@/components/ui/Toast';
-import AnalysisResults, { type AnalysisResult } from '@/components/dashboard/AnalysisResults';
+import ErrorBoundary from '@/components/ui/ErrorBoundary';
+import UploadCard, { validateUploadFile } from '@/components/dashboard/UploadCard';
+import StatusBadge from '@/components/dashboard/StatusBadge';
+import EmptyState from '@/components/dashboard/EmptyState';
+import PracticePlanView from '@/components/dashboard/PracticePlanView';
+import OverlayPanel from '@/components/dashboard/OverlayPanel';
+import ProgressIndicator from '@/components/dashboard/ProgressIndicator';
+import { useAnalysis } from '@/lib/hooks';
+import { absUrl } from '@/lib/api';
 import type { UserProfile } from '@/lib/supabase/database';
 
 interface DashboardClientProps {
@@ -23,17 +30,34 @@ interface DashboardClientProps {
   initialProfile: UserProfile | null;
 }
 
+function fmtDate(unixSeconds: number) {
+  const d = new Date(unixSeconds * 1000);
+  return d.toLocaleString();
+}
+
 export default function DashboardClient({ initialUser, initialProfile }: DashboardClientProps) {
   const router = useRouter();
   const toast = useToast();
   const [profile, setProfile] = useState<UserProfile | null>(initialProfile);
   const [loading, setLoading] = useState(false);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [sideFile, setSideFile] = useState<File | null>(null);
+  const [frontFile, setFrontFile] = useState<File | null>(null);
   const verificationAttemptedRef = useRef<string | null>(null);
+
+  // Use the analysis hook for state management
+  const {
+    state,
+    progressMessage,
+    result,
+    history,
+    uploadVideos,
+    refreshHistory,
+    isUploading,
+    isAnalyzing,
+    isCompleted,
+    hasError,
+    clearError,
+  } = useAnalysis();
 
   useEffect(() => {
     // Check for session_id in URL (from Stripe checkout redirect)
@@ -41,22 +65,15 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
       const params = new URLSearchParams(window.location.search);
       const sessionId = params.get('session_id');
       
-      // Only verify once per session_id - use ref to persist across renders
       if (sessionId && verificationAttemptedRef.current !== sessionId) {
         verificationAttemptedRef.current = sessionId;
-        
-        // Remove session_id from URL IMMEDIATELY to prevent re-triggering
         window.history.replaceState({}, '', '/dashboard');
         
-        // Verify the session and update profile
         try {
           const supabase = createSupabaseClient();
           const { data: { session } } = await supabase.auth.getSession();
           
-          if (!session?.access_token) {
-            console.warn('No session token available for verification');
-            return;
-          }
+          if (!session?.access_token) return;
 
           const response = await fetch('/api/verify-session', {
             method: 'POST',
@@ -69,150 +86,13 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
 
           const data = await response.json();
           
-          console.log('Session verification response:', data);
-          
           if (data.success && data.updated) {
             toast.success(`Successfully activated ${data.planType === 'starter' ? 'Starter' : 'Monthly'} Plan!`);
-            
-            // Use profile from response if available, otherwise fetch it
             if (data.profile) {
               setProfile(data.profile);
-              console.log('Profile updated from response:', data.profile);
-              // Force a re-render by updating state
-              if (!data.profile.is_paid) {
-                console.warn('Profile from response shows is_paid=false, but update was successful. Retrying...');
-                setTimeout(async () => {
-                  const { profile: retryProfile } = await getCurrentUserProfile();
-                  if (retryProfile) {
-                    setProfile(retryProfile);
-                    console.log('Profile retry after delay:', retryProfile);
-                  }
-                }, 1000);
-              }
             } else {
-              // Fallback: refresh profile immediately and retry if needed
-              try {
-                // First immediate refresh
-                const { profile: updatedProfile } = await getCurrentUserProfile();
-                if (updatedProfile) {
-                  setProfile(updatedProfile);
-                  console.log('Profile updated after purchase:', updatedProfile);
-                  
-                  // If still not showing as paid, wait a moment and try again (webhook might be processing)
-                  if (!updatedProfile.is_paid) {
-                    setTimeout(async () => {
-                      const { profile: retryProfile } = await getCurrentUserProfile();
-                      if (retryProfile) {
-                        setProfile(retryProfile);
-                        console.log('Profile retry after delay:', retryProfile);
-                        // One more retry if still not paid
-                        if (!retryProfile.is_paid) {
-                          setTimeout(async () => {
-                            const { profile: finalProfile } = await getCurrentUserProfile();
-                            if (finalProfile) {
-                              setProfile(finalProfile);
-                              console.log('Final profile retry:', finalProfile);
-                            }
-                          }, 3000);
-                        }
-                      }
-                    }, 2000);
-                  }
-                }
-              } catch (err) {
-                console.error('Error refreshing profile:', err);
-              }
-            }
-          } else if (data.success && !data.updated) {
-            // Session verified but not updated - might be processing or webhook already handled it
-            console.log('Session verified but not updated:', data.message);
-            
-            // Try to refresh profile once after a delay
-            setTimeout(async () => {
-              try {
-                const { profile: updatedProfile } = await getCurrentUserProfile();
-                if (updatedProfile) {
-                  setProfile(updatedProfile);
-                  if (updatedProfile.is_paid) {
-                    toast.success(`Successfully activated ${updatedProfile.plan_type === 'starter' ? 'Starter' : 'Monthly'} Plan!`);
-                  }
-                }
-              } catch (err) {
-                console.error('Error refreshing profile:', err);
-              }
-            }, 2000);
-          } else if (data.error) {
-            console.error('Session verification error:', data.error);
-            
-            // Check if migration is required
-            if (data.migrationRequired || data.error.includes('migration') || data.error.includes('PGRST204')) {
-              // Migration needed - show helpful message
-              toast.error(
-                `Database migration required. Your payment was processed, but please run the migration in Supabase to activate all features.`,
-                10000
-              );
-              
-              // Still try to refresh profile in case basic update succeeded
-              setTimeout(async () => {
-                try {
-                  const { profile: updatedProfile } = await getCurrentUserProfile();
-                  if (updatedProfile) {
-                    setProfile(updatedProfile);
-                    if (updatedProfile.is_paid) {
-                      toast.success(`Plan activated! (Run migration for full features)`);
-                    }
-                  }
-                } catch (err) {
-                  console.error('Error refreshing profile:', err);
-                }
-              }, 2000);
-            } else if (data.warning) {
-              // Migration needed but basic update succeeded
-              toast.success(`Plan activated! (Some features require database migration)`);
-              // Still try to refresh profile
-              setTimeout(async () => {
-                try {
-                  const { profile: updatedProfile } = await getCurrentUserProfile();
-                  if (updatedProfile) {
-                    setProfile(updatedProfile);
-                  }
-                } catch (err) {
-                  console.error('Error refreshing profile:', err);
-                }
-              }, 1000);
-            } else {
-              // Other error - but payment might have succeeded, so check profile anyway
-              console.warn('Verification failed, but checking profile in case payment succeeded:', data.error);
-              
-              // Try to refresh profile multiple times in case webhook processed it
-              const checkProfile = async (attempt = 1) => {
-                try {
-                  const { profile: updatedProfile } = await getCurrentUserProfile();
-                  if (updatedProfile) {
-                    setProfile(updatedProfile);
-                    if (updatedProfile.is_paid) {
-                      toast.success(`Plan activated!`);
-                      return; // Success, stop retrying
-                    }
-                  }
-                  
-                  // Retry up to 3 times
-                  if (attempt < 3) {
-                    setTimeout(() => checkProfile(attempt + 1), 2000);
-                  } else {
-                    // Final attempt failed - show error
-                    toast.error(`Payment verification failed. If payment succeeded, please refresh the page.`);
-                  }
-                } catch (err) {
-                  console.error('Error refreshing profile:', err);
-                  if (attempt < 3) {
-                    setTimeout(() => checkProfile(attempt + 1), 2000);
-                  }
-                }
-              };
-              
-              // Start checking profile
-              setTimeout(() => checkProfile(), 2000);
+              const { profile: updatedProfile } = await getCurrentUserProfile();
+              if (updatedProfile) setProfile(updatedProfile);
             }
           }
         } catch (err) {
@@ -222,189 +102,79 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
       }
     };
 
-    // Refresh profile data function
     const refreshProfile = async () => {
       try {
-        const { profile: updatedProfile, error } = await getCurrentUserProfile();
+        const { profile: updatedProfile } = await getCurrentUserProfile();
         if (updatedProfile) {
           setProfile(updatedProfile);
-          console.log('Profile loaded:', updatedProfile);
-        } else if (error) {
-          // Log error but don't retry - might be RLS or migration issue
-          console.warn('Profile load error (non-critical):', error);
         }
       } catch (err) {
-        // Don't log errors that might cause re-renders
         console.warn('Error refreshing profile:', err);
       }
     };
 
-    // Check if we're returning from Stripe checkout
     const params = new URLSearchParams(window.location.search);
     const hasSessionId = params.get('session_id');
     
     if (hasSessionId) {
-      // Verify session and refresh profile
       checkSessionId();
     } else {
-      // Normal page load - just refresh profile
       refreshProfile();
     }
   }, [toast]);
 
-  const handleSignOut = async () => {
+  const handleSignOut = useCallback(async () => {
     const supabase = createSupabaseClient();
     await supabase.auth.signOut();
     router.push('/login', { scroll: false });
-  };
+  }, [router]);
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      
-      // Validate file type
-      const validTypes = ['video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo', 'video/webm'];
-      if (!validTypes.includes(file.type)) {
-        toast.error('Please upload a valid video file (MP4, MOV, AVI, or WebM)');
-        return;
-      }
-
-      // Validate file size (max 100MB)
-      const maxSize = 100 * 1024 * 1024;
-      if (file.size > maxSize) {
-        toast.error('File size must be less than 100MB');
-        return;
-      }
-
-      setSelectedFile(file);
-      setError(null);
-      toast.success('Video file selected');
-    }
-  };
-
-  const handleAnalyze = async () => {
-    if (!selectedFile) {
-      toast.error('Please select a video file first');
-      return;
-    }
-
+  const handleUpload = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    
     if (!profile?.is_paid) {
       toast.error('You need to purchase a plan to analyze throws');
-      router.push('/pricing', { scroll: false });
+      router.push('/pricing');
       return;
     }
 
-    // Check usage limits
     const remaining = (profile.analysis_limit || 0) - (profile.analysis_count || 0);
     if (remaining <= 0) {
       toast.error('You have reached your analysis limit');
       return;
     }
 
-    setAnalyzing(true);
-    setError(null);
-    setAnalysisResult(null);
-    toast.info('Uploading and analyzing video...');
+    if (!sideFile && !frontFile) {
+      toast.error('Upload at least one video: side-on and/or front-on.');
+      return;
+    }
 
     try {
-      const supabase = createSupabaseClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session?.access_token) {
-        throw new Error('Not authenticated');
-      }
-
-      // Create FormData for file upload
-      const formData = new FormData();
-      formData.append('video', selectedFile);
-      formData.append('userId', initialUser?.id || '');
-
-      const response = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: formData,
-      });
-
-      // Handle streaming response if backend supports it
-      const contentType = response.headers.get('content-type');
-      let data;
-      
-      if (contentType?.includes('application/json')) {
-        data = await response.json();
-      } else {
-        // Handle text response
-        const text = await response.text();
-        try {
-          data = JSON.parse(text);
-        } catch {
-          throw new Error('Invalid response from server');
-        }
-      }
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to analyze video');
-      }
-
-      // Handle different response formats
-      const result: AnalysisResult = {
-        id: data.analysisId || data.id || `analysis_${Date.now()}`,
-        status: data.status || 'completed',
-        timestamp: data.results?.timestamp || data.timestamp || new Date().toISOString(),
-        insights: data.results?.insights || data.insights || [],
-        recommendations: data.results?.recommendations || data.recommendations || [],
-        metrics: data.results?.metrics || data.metrics,
-        videoUrl: data.results?.videoUrl || data.videoUrl,
-        reportUrl: data.results?.reportUrl || data.reportUrl,
-      };
-
-      setAnalysisResult(result);
-      setUploadProgress(100);
-      toast.success('Analysis completed successfully!');
+      await uploadVideos(sideFile, frontFile);
+      setSideFile(null);
+      setFrontFile(null);
       
       // Refresh profile to update analysis count
       const { profile: updatedProfile } = await getCurrentUserProfile();
-      if (updatedProfile) {
-        setProfile(updatedProfile);
-      }
-    } catch (err: any) {
-      console.error('Analysis error:', err);
-      const errorMessage = err.message || 'Failed to analyze video. Please try again.';
-      setError(errorMessage);
-      setUploadProgress(0);
-      
-      // Set failed status if we have a result object
-      if (analysisResult) {
-        setAnalysisResult({
-          ...analysisResult,
-          status: 'failed',
-        });
-      }
-      
-      toast.error(errorMessage);
-    } finally {
-      setAnalyzing(false);
+      if (updatedProfile) setProfile(updatedProfile);
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      toast.error(error?.message || 'Upload failed.');
     }
-  };
+  }, [profile, sideFile, frontFile, toast, router, uploadVideos]);
 
-  const handleRemoveFile = () => {
-    setSelectedFile(null);
-    setAnalysisResult(null);
-    setError(null);
-    setUploadProgress(0);
-  };
+  const remaining = useMemo(() => (
+    profile?.analysis_limit && profile.analysis_count !== undefined
+      ? profile.analysis_limit - profile.analysis_count
+      : 0
+  ), [profile?.analysis_limit, profile?.analysis_count]);
 
-  const handleNewAnalysis = () => {
-    setSelectedFile(null);
-    setAnalysisResult(null);
-    setError(null);
-    setUploadProgress(0);
-  };
-
-  const remaining = profile?.analysis_limit && profile.analysis_count !== undefined
-    ? profile.analysis_limit - profile.analysis_count
-    : 0;
+  const hasResult = useMemo(() => isCompleted && result?.result, [isCompleted, result]);
+  const overlayUrl = useMemo(() => (hasResult && result?.result ? absUrl(result.result.overlay_url || '') : ''), [hasResult, result]);
+  const overlaySideUrl = useMemo(() => (hasResult && result?.result ? absUrl(result.result.overlay_side_url || '') : ''), [hasResult, result]);
+  const overlayFrontUrl = useMemo(() => (hasResult && result?.result ? absUrl(result.result.overlay_front_url || '') : ''), [hasResult, result]);
+  const pdfUrl = useMemo(() => (hasResult && result?.result ? absUrl(result.result.practice_plan_pdf_url || '') : ''), [hasResult, result]);
+  const lessonPlan = useMemo(() => (hasResult && result?.result ? result.result.lesson_plan : null), [hasResult, result]);
 
   return (
     <ProtectedRoute>
@@ -413,68 +183,14 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
         user={initialUser ? { email: initialUser.email } : null}
         onSignOut={handleSignOut}
       >
-        <div className="space-y-8">
-          {/* Welcome Section */}
-          <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-lg p-8 text-white">
-            <div className="flex items-start justify-between">
-              <div className="flex-1">
-                <h1 className="text-3xl md:text-4xl font-bold mb-2">
-                  Welcome back{initialUser?.email ? `, ${initialUser.email.split('@')[0]}` : ''}!
-                </h1>
-                <p className="text-blue-100 text-lg">
-                  {profile?.is_paid 
-                    ? profile?.plan_type === 'monthly'
-                      ? "You're on the Monthly Plan with 12 analyses per month. Let's get started!"
-                      : "You're on the Starter Plan with 3 analyses. Let's get started!"
-                    : "Ready to start analyzing your throws? Choose a plan to get started."}
-                </p>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={async () => {
-                  const { profile: updatedProfile } = await getCurrentUserProfile();
-                  if (updatedProfile) {
-                    setProfile(updatedProfile);
-                    toast.success('Profile refreshed!');
-                  }
-                }}
-                className="bg-white/10 hover:bg-white/20 text-white border-white/20 ml-4"
-              >
-                Refresh
-              </Button>
-            </div>
+        <div className="space-y-6">
+          {/* Header Section */}
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Video Analysis Dashboard</h1>
+            <p className="text-gray-600 mt-2">
+              Upload your throw videos and get AI-powered coaching insights
+            </p>
           </div>
-
-          {/* Membership Status - Show when user has a paid plan */}
-          {profile?.is_paid && profile?.plan_type ? (
-            <Card className="border-blue-200 bg-blue-50">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="h-12 w-12 rounded-full bg-blue-600 flex items-center justify-center">
-                      <CheckCircle className="h-6 w-6 text-white" />
-                    </div>
-                    <div>
-                      <h3 className="text-lg font-semibold text-gray-900">
-                        {profile.plan_type === 'monthly' ? 'Monthly Plan' : 'Starter Plan'} - Active
-                      </h3>
-                      <p className="text-sm text-gray-600 mt-1">
-                        {profile.plan_type === 'monthly' 
-                          ? '12 analyses per month • Billed monthly'
-                          : '3 analyses total • One-time payment'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <span className="px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
-                      Active
-                    </span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ) : null}
 
           {/* Usage Status */}
           {profile?.is_paid && (
@@ -504,168 +220,278 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
             </Card>
           )}
 
-          {/* File Upload & Analysis Section */}
-          {profile?.is_paid ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>Analyze Your Throw</CardTitle>
-                <CardDescription>
-                  Upload a video file of your throw for AI analysis (MP4, MOV, AVI, or WebM, max 100MB)
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                {/* File Input */}
-                <div>
-                  <label htmlFor="video-upload" className="block text-sm font-medium text-gray-700 mb-2">
-                    Select Video File
-                  </label>
-                  <div className="flex items-center gap-4">
-                    <Input
-                      id="video-upload"
-                      type="file"
-                      accept="video/*"
-                      onChange={handleFileSelect}
-                      disabled={analyzing}
-                      className="cursor-pointer"
-                    />
-                    {selectedFile && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleRemoveFile}
-                        disabled={analyzing}
-                      >
-                        <X className="h-4 w-4 mr-2" />
-                        Remove
-                      </Button>
-                    )}
-                  </div>
-                  {selectedFile && (
-                    <div className="mt-2 flex items-center gap-2 text-sm text-gray-600">
-                      <Video className="h-4 w-4" />
-                      <span>{selectedFile.name}</span>
-                      <span className="text-gray-400">
-                        ({(selectedFile.size / (1024 * 1024)).toFixed(2)} MB)
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Upload Progress */}
-                {analyzing && uploadProgress > 0 && uploadProgress < 100 && (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-sm text-gray-600">
-                      <span>Uploading...</span>
-                      <span>{uploadProgress}%</span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div
-                        className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                        style={{ width: `${uploadProgress}%` }}
+          {/* Main Content Grid: Left (Upload) + Right (Results) */}
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-6">
+            {/* Left Column: Upload Area */}
+            <ErrorBoundary>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Upload Videos</CardTitle>
+                  <CardDescription>
+                    Upload side-on and/or front-on videos. If you upload both, we combine them into one analysis.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {profile?.is_paid ? (
+                    <form onSubmit={handleUpload} className="space-y-4">
+                      <UploadCard
+                        label="Side-on video (recommended)"
+                        hint="Best for elbow path, tempo, and release-line mechanics."
+                        file={sideFile}
+                        setFile={setSideFile}
+                        busy={isUploading || isAnalyzing}
+                        validate={validateUploadFile}
                       />
-                    </div>
-                  </div>
-                )}
 
-                {/* Analyze Button */}
-                <Button
-                  variant="primary"
-                  size="lg"
-                  className="w-full"
-                  onClick={handleAnalyze}
-                  disabled={!selectedFile || analyzing || remaining <= 0}
-                  isLoading={analyzing}
-                >
-                  {analyzing ? (
-                    <>
-                      <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                      {uploadProgress > 0 && uploadProgress < 100 ? 'Uploading...' : 'Analyzing...'}
-                    </>
+                      <UploadCard
+                        label="Front-on video (optional)"
+                        hint="Best for sway, alignment, and shoulder/hip drift."
+                        file={frontFile}
+                        setFile={setFrontFile}
+                        busy={isUploading || isAnalyzing}
+                        validate={validateUploadFile}
+                      />
+
+                      {/* Progress Indicator */}
+                      <ProgressIndicator
+                        onCancel={() => {
+                          setSideFile(null);
+                          setFrontFile(null);
+                        }}
+                        showCancelButton={true}
+                      />
+
+                      <Button
+                        variant="primary"
+                        size="lg"
+                        className="w-full"
+                        type="submit"
+                        disabled={isUploading || isAnalyzing || (!sideFile && !frontFile) || remaining <= 0}
+                        isLoading={isUploading || isAnalyzing}
+                      >
+                        {isUploading || isAnalyzing ? (
+                          <>
+                            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                            {progressMessage || 'Processing...'}
+                          </>
+                        ) : (
+                          <>
+                            <Upload className="mr-2 h-5 w-5" />
+                            Analyze Videos
+                          </>
+                        )}
+                      </Button>
+                    </form>
                   ) : (
-                    <>
-                      <Upload className="mr-2 h-5 w-5" />
-                      Analyze Throw
-                    </>
-                  )}
-                </Button>
-
-                {/* Error Display */}
-                {error && (
-                  <div className="p-4 bg-red-50 border border-red-200 rounded-md">
-                    <div className="flex items-start">
-                      <AlertCircle className="h-5 w-5 text-red-600 mr-2 flex-shrink-0 mt-0.5" />
-                      <div>
-                        <p className="text-sm font-medium text-red-800">Error</p>
-                        <p className="text-sm text-red-700 mt-1">{error}</p>
+                    <div className="p-6 bg-yellow-50 border border-yellow-200 rounded-lg">
+                      <div className="flex items-start gap-4">
+                        <AlertCircle className="h-6 w-6 text-yellow-600 flex-shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                          <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                            Purchase a Plan to Get Started
+                          </h3>
+                          <p className="text-gray-700 mb-4">
+                            You need to purchase a plan to analyze your throws.
+                          </p>
+                          <Link href="/pricing">
+                            <Button variant="primary">View Pricing Plans</Button>
+                          </Link>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )}
+                  )}
+                </CardContent>
+              </Card>
+            </ErrorBoundary>
 
-                {/* Results Display */}
-                {analysisResult && (
-                  <AnalysisResults 
-                    result={analysisResult} 
-                    onNewAnalysis={handleNewAnalysis}
+            {/* Right Column: Results Display */}
+            <ErrorBoundary>
+              {hasResult ? (
+                <div className="space-y-6">
+                  {/* Overlay Video */}
+                  <OverlayPanel
+                    overlayUrl={overlayUrl}
+                    overlaySideUrl={overlaySideUrl}
+                    overlayFrontUrl={overlayFrontUrl}
                   />
-                )}
-              </CardContent>
-            </Card>
-          ) : (
-            <Card className="border-yellow-200 bg-yellow-50">
-              <CardContent className="pt-6">
-                <div className="flex items-start gap-4">
-                  <AlertCircle className="h-6 w-6 text-yellow-600 flex-shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                      Purchase a Plan to Get Started
-                    </h3>
-                    <p className="text-gray-700 mb-4">
-                      You need to purchase a plan to analyze your throws. Choose between our Starter Plan (3 analyses) or Monthly Plan (12 analyses per month).
-                    </p>
-                    <Link href="/pricing">
-                      <Button variant="primary">View Pricing Plans</Button>
-                    </Link>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
 
-          {/* Quick Actions */}
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-4">Quick Actions</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              <Card className="hover:shadow-lg transition-shadow">
-                <Link href="/dashboard/profile">
-                  <CardHeader>
-                    <CardTitle className="text-lg">Profile Settings</CardTitle>
-                    <CardDescription>Update your account information</CardDescription>
-                  </CardHeader>
-                </Link>
-              </Card>
-
-              <Card className="hover:shadow-lg transition-shadow">
-                <Link href="/dashboard/billing">
-                  <CardHeader>
-                    <CardTitle className="text-lg">Billing & Subscription</CardTitle>
-                    <CardDescription>Manage your subscription</CardDescription>
-                  </CardHeader>
-                </Link>
-              </Card>
-
-              {profile?.is_paid && (
-                <Card className="hover:shadow-lg transition-shadow">
-                  <Link href="/dashboard/analyze">
+                  {/* Practice Plan */}
+                  <Card>
                     <CardHeader>
-                      <CardTitle className="text-lg">Full Analysis</CardTitle>
-                      <CardDescription>Upload and analyze throws</CardDescription>
+                      <div className="flex items-center justify-between">
+                        <CardTitle>Practice Plan</CardTitle>
+                        {pdfUrl && (
+                          <a
+                            href={pdfUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-semibold"
+                          >
+                            <Upload className="h-4 w-4 mr-2" />
+                            PDF
+                          </a>
+                        )}
+                      </div>
                     </CardHeader>
-                  </Link>
+                    <CardContent>
+                      <PracticePlanView
+                        plan={result?.result?.practice_plan}
+                        lesson={lessonPlan}
+                      />
+                    </CardContent>
+                  </Card>
+                </div>
+              ) : (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Analysis Results</CardTitle>
+                    <CardDescription>
+                      Results will appear here after you upload and analyze videos
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <EmptyState
+                      title="No results yet"
+                      subtitle="Upload a video to generate your first coaching report."
+                    />
+                  </CardContent>
                 </Card>
               )}
-            </div>
+            </ErrorBoundary>
           </div>
+
+          {/* Bottom Section: Job History Table */}
+          <ErrorBoundary>
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Analysis History</CardTitle>
+                    <CardDescription>
+                      View all your previous analyses
+                    </CardDescription>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={refreshHistory}
+                    disabled={loading}
+                  >
+                    <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                    Refresh
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {loading && history.length === 0 ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                  </div>
+                ) : history.length === 0 ? (
+                  <EmptyState
+                    title="No analyses yet"
+                    subtitle="Upload a video to generate your first report."
+                  />
+                ) : (
+                  <>
+                    {/* Desktop Table View */}
+                    <div className="hidden md:block overflow-x-auto">
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b border-gray-200">
+                            <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Date</th>
+                            <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Filename</th>
+                            <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Status</th>
+                            <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Throws</th>
+                            <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {history.map((job) => (
+                            <tr
+                              key={job.job_id}
+                              className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
+                            >
+                              <td className="py-3 px-4 text-sm text-gray-600 whitespace-nowrap">
+                                {fmtDate(job.created_at_unix)}
+                              </td>
+                              <td className="py-3 px-4 text-sm">
+                                <div className="font-medium text-gray-900">
+                                  {job.original_filename || '(unknown)'}
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 text-sm">
+                                <div className="flex items-center gap-2">
+                                  <StatusBadge status={job.status} />
+                                  {job.status === 'running' && typeof job.progress === 'number' && (
+                                    <span className="text-xs text-gray-500">
+                                      {Math.round((job.progress || 0) * 100)}%
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 text-sm text-gray-600">
+                                {typeof job.throws_detected === 'number' ? job.throws_detected : '-'}
+                              </td>
+                              <td className="py-3 px-4 text-sm">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => router.push(`/dashboard/analyze/${job.job_id}`)}
+                                >
+                                  View
+                                </Button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Mobile Card View */}
+                    <div className="md:hidden space-y-3">
+                      {history.map((job) => (
+                        <Card key={job.job_id} className="hover:shadow-md transition-shadow">
+                          <CardContent className="pt-4">
+                            <div className="space-y-3">
+                              <div className="flex items-start justify-between">
+                                <div className="flex-1 min-w-0">
+                                  <h4 className="font-semibold text-gray-900 truncate">
+                                    {job.original_filename || '(unknown)'}
+                                  </h4>
+                                  <p className="text-xs text-gray-500 mt-1">
+                                    {fmtDate(job.created_at_unix)}
+                                  </p>
+                                </div>
+                                <StatusBadge status={job.status} />
+                              </div>
+                              
+                              <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+                                <div className="text-sm text-gray-600">
+                                  {typeof job.throws_detected === 'number' ? (
+                                    <span>{job.throws_detected} throws</span>
+                                  ) : (
+                                    <span>-</span>
+                                  )}
+                                </div>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => router.push(`/dashboard/analyze/${job.job_id}`)}
+                                >
+                                  View Details
+                                </Button>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </ErrorBoundary>
         </div>
       </DashboardLayout>
     </ProtectedRoute>
