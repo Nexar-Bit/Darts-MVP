@@ -46,6 +46,15 @@ function AuthCallbackContent() {
           return;
         }
 
+        // Check if this is a password reset flow
+        if (type === 'recovery' || window.location.pathname.includes('reset-password')) {
+          // For password reset, redirect to the reset password page
+          // The tokens will be in the URL hash, so we preserve them
+          const currentUrl = window.location.href;
+          router.push(`/auth/reset-password${window.location.hash || window.location.search}`);
+          return;
+        }
+
         // If we have tokens, Supabase should handle them automatically
         // But we can also manually set the session if needed
         if (accessToken && refreshToken) {
