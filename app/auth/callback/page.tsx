@@ -5,7 +5,7 @@
 export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
 
-import { useEffect, useState, Suspense } from 'react';
+import { useEffect, useState, Suspense, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createSupabaseClient } from '@/lib/supabase/supabaseClient';
 import { useToast, ToastContainer } from '@/components/ui/Toast';
@@ -17,9 +17,17 @@ function AuthCallbackContent() {
   const toast = useToast();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [message, setMessage] = useState('Processing authentication...');
+  const hasProcessed = useRef(false);
+  const redirecting = useRef(false);
 
   useEffect(() => {
+    // Prevent multiple executions (React Strict Mode in dev)
+    if (hasProcessed.current) {
+      return;
+    }
+
     const handleAuthCallback = async () => {
+      hasProcessed.current = true;
       try {
         const supabase = createSupabaseClient();
         
@@ -38,11 +46,16 @@ function AuthCallbackContent() {
         if (error) {
           setStatus('error');
           setMessage(errorDescription || error || 'Authentication failed');
-          toast.error(errorDescription || error || 'Authentication failed');
+          if (!redirecting.current) {
+            toast.error(errorDescription || error || 'Authentication failed');
+          }
           
-          setTimeout(() => {
-            router.push('/login', { scroll: false });
-          }, 3000);
+          if (!redirecting.current) {
+            redirecting.current = true;
+            setTimeout(() => {
+              window.location.href = '/login';
+            }, 3000);
+          }
           return;
         }
 
@@ -72,18 +85,28 @@ function AuthCallbackContent() {
             
             if (type === 'signup') {
               setMessage('Email confirmed! Your account has been activated.');
-              toast.success('Email confirmed! Your account has been activated.');
+              // Only show toast once
+              if (!redirecting.current) {
+                toast.success('Email confirmed! Your account has been activated.');
+              }
             } else {
               setMessage('Successfully authenticated!');
-              toast.success('Successfully authenticated!');
+              // Only show toast once
+              if (!redirecting.current) {
+                toast.success('Successfully authenticated!');
+              }
             }
 
             // Redirect to dashboard or next URL
             const next = searchParams.get('next') || '/dashboard';
-            setTimeout(() => {
-              router.push(next, { scroll: false });
-              router.refresh();
-            }, 1500);
+            
+            // Use window.location for a full page redirect to prevent issues
+            if (!redirecting.current) {
+              redirecting.current = true;
+              setTimeout(() => {
+                window.location.href = next;
+              }, 1000);
+            }
             return;
           }
         }
@@ -93,38 +116,56 @@ function AuthCallbackContent() {
         if (session) {
           setStatus('success');
           setMessage('You are already signed in.');
-          toast.success('You are already signed in.');
+          // Only show toast once
+          if (!redirecting.current) {
+            toast.success('You are already signed in.');
+          }
           
           const next = searchParams.get('next') || '/dashboard';
-          setTimeout(() => {
-            router.push(next, { scroll: false });
-            router.refresh();
-          }, 1500);
+          
+          // Use window.location for a full page redirect to prevent issues
+          if (!redirecting.current) {
+            redirecting.current = true;
+            setTimeout(() => {
+              window.location.href = next;
+            }, 1000);
+          }
           return;
         }
 
         // If we get here, something went wrong
         setStatus('error');
         setMessage('Unable to complete authentication. Please try again.');
-        toast.error('Unable to complete authentication. Please try again.');
+        if (!redirecting.current) {
+          toast.error('Unable to complete authentication. Please try again.');
+        }
         
-        setTimeout(() => {
-          router.push('/login');
-        }, 3000);
+        if (!redirecting.current) {
+          redirecting.current = true;
+          setTimeout(() => {
+            window.location.href = '/login';
+          }, 3000);
+        }
       } catch (error: any) {
         console.error('Auth callback error:', error);
         setStatus('error');
         setMessage(error.message || 'An error occurred during authentication.');
-        toast.error(error.message || 'An error occurred during authentication.');
+        if (!redirecting.current) {
+          toast.error(error.message || 'An error occurred during authentication.');
+        }
         
-        setTimeout(() => {
-          router.push('/login');
-        }, 3000);
+        if (!redirecting.current) {
+          redirecting.current = true;
+          setTimeout(() => {
+            window.location.href = '/login';
+          }, 3000);
+        }
       }
     };
 
     handleAuthCallback();
-  }, [router, searchParams, toast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run once on mount
 
   return (
     <>
@@ -167,7 +208,16 @@ function AuthCallbackContent() {
                       Success!
                     </h2>
                     <p className="text-gray-600">{message}</p>
-                    <p className="text-sm text-gray-500 mt-2">Redirecting...</p>
+                    <p className="text-sm text-gray-500 mt-2 mb-4">Redirecting...</p>
+                    <button
+                      onClick={() => {
+                        const next = searchParams.get('next') || '/dashboard';
+                        window.location.href = next;
+                      }}
+                      className="text-sm text-blue-600 hover:text-blue-700 underline"
+                    >
+                      Click here if you&apos;re not redirected automatically
+                    </button>
                   </>
                 )}
 
@@ -192,7 +242,15 @@ function AuthCallbackContent() {
                       Error
                     </h2>
                     <p className="text-gray-600">{message}</p>
-                    <p className="text-sm text-gray-500 mt-2">Redirecting to login...</p>
+                    <p className="text-sm text-gray-500 mt-2 mb-4">Redirecting to login...</p>
+                    <button
+                      onClick={() => {
+                        window.location.href = '/login';
+                      }}
+                      className="text-sm text-blue-600 hover:text-blue-700 underline"
+                    >
+                      Click here to go to login
+                    </button>
                   </>
                 )}
               </div>
