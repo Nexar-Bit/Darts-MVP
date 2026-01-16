@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Check, Loader2 } from 'lucide-react';
+import { Check, Loader2, CreditCard, Smartphone, Wallet } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/Card';
 import { createSupabaseClient } from '@/lib/supabase/supabaseClient';
@@ -197,6 +197,28 @@ export default function PricingPage() {
               </CardFooter>
             </Card>
           ))}
+        </div>
+
+        {/* Payment Methods */}
+        <div className="text-center mt-12">
+          <p className="text-sm text-gray-600 mb-4">Secure payment methods</p>
+          <div className="flex items-center justify-center gap-4 flex-wrap">
+            <div className="flex items-center gap-2 text-gray-600">
+              <CreditCard className="h-5 w-5" />
+              <span className="text-sm">Card</span>
+            </div>
+            <div className="flex items-center gap-2 text-gray-600">
+              <Smartphone className="h-5 w-5" />
+              <span className="text-sm">Apple Pay</span>
+            </div>
+            <div className="flex items-center gap-2 text-gray-600">
+              <Wallet className="h-5 w-5" />
+              <span className="text-sm">PayPal</span>
+            </div>
+          </div>
+          <p className="text-xs text-gray-500 mt-3">
+            All payments are processed securely through Stripe
+          </p>
         </div>
 
         {/* FAQ Link */}

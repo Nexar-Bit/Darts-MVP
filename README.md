@@ -42,7 +42,7 @@ Before you begin, ensure you have:
    
    Then edit `.env.local` and fill in all the required values (see [Environment Variables](#environment-variables) section below).
    
-   For detailed environment setup instructions, see [ENV_SETUP.md](./ENV_SETUP.md).
+   For detailed environment setup instructions, see [ENV_VARIABLES_REFERENCE.md](./ENV_VARIABLES_REFERENCE.md).
 
 4. **Set up Supabase**
    - Create a new Supabase project at [supabase.com](https://supabase.com)
@@ -240,6 +240,16 @@ Use Stripe test cards:
 stripe listen --forward-to localhost:3000/api/webhook
 stripe trigger checkout.session.completed
 ```
+
+## 📚 Documentation
+
+For additional documentation, see:
+- **[DEPLOYMENT.md](./DEPLOYMENT.md)** - Complete deployment guide
+- **[DEPLOYMENT_CHECKLIST.md](./DEPLOYMENT_CHECKLIST.md)** - Pre-deployment checklist
+- **[ENV_VARIABLES_REFERENCE.md](./ENV_VARIABLES_REFERENCE.md)** - Detailed environment variables guide
+- **[API_INTEGRATION.md](./API_INTEGRATION.md)** - API integration documentation
+- **[QUICK_START.md](./QUICK_START.md)** - Quick deployment reference
+- **[PAYMENT_METHODS_SETUP.md](./PAYMENT_METHODS_SETUP.md)** - How to enable PayPal and Apple Pay
 
 ## 📝 API Endpoints
 

@@ -156,6 +156,23 @@ If you're using production Stripe:
 2. Get the production Price IDs
 3. Update `NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID` and `NEXT_PUBLIC_STRIPE_MONTHLY_PRICE_ID` in Vercel
 
+### 3.4 Enable Payment Methods (Apple Pay & PayPal)
+
+1. **Enable PayPal**:
+   - Go to Stripe Dashboard > Settings > Payment methods
+   - Enable PayPal
+   - Complete any required PayPal account setup
+   - PayPal will appear as an option in checkout (explicitly enabled in code)
+
+2. **Enable Apple Pay**:
+   - Go to Stripe Dashboard > Settings > Payment methods
+   - Enable Apple Pay
+   - For production: Verify your domain in Stripe Dashboard
+   - Apple Pay will automatically appear in checkout on supported devices (Safari on iOS/macOS, Chrome on iOS)
+   - **Note**: Apple Pay is handled automatically by Stripe - it doesn't need to be in `payment_method_types`
+
+**Note**: PayPal is explicitly configured in the code. Apple Pay is automatically handled by Stripe when enabled in the dashboard.
+
 ## ✅ Step 4: Verify Deployment
 
 ### 4.1 Test in Preview Environment

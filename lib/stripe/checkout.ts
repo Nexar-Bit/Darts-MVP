@@ -45,6 +45,11 @@ export async function createCheckoutSession({
       },
       // Allow promotion codes
       allow_promotion_codes: true,
+      // Enable PayPal (explicitly)
+      // Note: Apple Pay is automatically available when enabled in Stripe Dashboard
+      // and the customer is on a supported device (Safari on iOS/macOS, Chrome on iOS)
+      // Apple Pay doesn't need to be in payment_method_types - it's handled automatically
+      payment_method_types: ['card', 'paypal'],
       // Subscription-specific settings
       ...(mode === 'subscription' && {
         subscription_data: {

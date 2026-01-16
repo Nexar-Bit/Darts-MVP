@@ -133,6 +133,17 @@ AI_BACKEND_API_KEY=your_backend_api_key_if_required
 - **Local**: Run `stripe listen --forward-to localhost:3000/api/webhook`
 - **Production**: Stripe Dashboard > Developers > Webhooks > Signing secret
 
+## Payment Methods
+
+The application supports multiple payment methods through Stripe:
+- **Credit/Debit Cards** - All major cards (Visa, Mastercard, Amex, etc.)
+- **PayPal** - Explicitly enabled in checkout (must be enabled in Stripe Dashboard)
+- **Apple Pay** - Automatically available on supported devices when enabled in Stripe Dashboard
+
+**Note**: 
+- **PayPal**: Must be enabled in Stripe Dashboard > Settings > Payment methods. It's explicitly included in the checkout session.
+- **Apple Pay**: Automatically appears when enabled in Stripe Dashboard and the customer is on a supported device (Safari on iOS/macOS, Chrome on iOS). Requires HTTPS and domain verification for production.
+
 ### AI_BACKEND_URL
 - **Type**: Private (server-side only)
 - **Description**: URL of AI backend service
