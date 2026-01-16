@@ -129,7 +129,8 @@ export async function GET(
     }
 
     // Step 5: Forward request to backend API
-    const backendResponse = await fetch(`${backendUrl}/jobs/${jobId}`, {
+    // Backend endpoint: GET /status/{job_id}
+    const backendResponse = await fetch(`${backendUrl}/status/${jobId}`, {
       method: 'GET',
       headers: {
         // Include API key if configured

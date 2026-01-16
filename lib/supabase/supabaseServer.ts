@@ -27,7 +27,14 @@ export function createSupabaseServerClient() {
  * Use this when you need to check user permissions on the server
  */
 export function createSupabaseServerClientWithAuth(accessToken?: string) {
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  if (!supabaseUrl) {
+    throw new Error('NEXT_PUBLIC_SUPABASE_URL is not set in environment variables');
+  }
+
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!supabaseAnonKey) {
+    throw new Error('NEXT_PUBLIC_SUPABASE_ANON_KEY is not set in environment variables');
+  }
 
   const client = createClient(supabaseUrl, supabaseAnonKey, {
     auth: {

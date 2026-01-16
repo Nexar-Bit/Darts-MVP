@@ -252,6 +252,9 @@ export async function POST(request: NextRequest) {
           .eq('job_id', jobId);
 
         // Forward request to AI backend with user context
+        // Backend flow: First upload videos, then start analysis
+        // For now, we'll call /analyze which may handle both upload and analysis
+        // If backend requires separate /upload then /analyze, we'll need to update this
         const backendResponse = await fetch(`${aiBackendUrl}/analyze?model=${encodeURIComponent(model)}`, {
           method: 'POST',
           headers: {

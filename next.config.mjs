@@ -31,12 +31,18 @@ const nextConfig = {
   env: {
     // These are already available via process.env, but explicitly listed for clarity
   },
-  // Output configuration for Vercel
-  output: 'standalone',
+  // Output configuration for Vercel (production only)
+  // Note: 'standalone' output is for production builds, not dev server
+  // Vercel will use this automatically in production
   // Experimental features
   experimental: {
     // Enable server actions if needed in the future
   },
 };
+
+// Only add 'standalone' output in production (for Vercel deployment)
+if (process.env.NODE_ENV === 'production') {
+  nextConfig.output = 'standalone';
+}
 
 export default nextConfig;

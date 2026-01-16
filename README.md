@@ -244,6 +244,12 @@ stripe trigger checkout.session.completed
 ## 📚 Documentation
 
 For additional documentation, see:
+- **[PROJECT_COMPLETION_CHECKLIST.md](./PROJECT_COMPLETION_CHECKLIST.md)** - What's needed to complete the project
+- **[DATABASE_MIGRATION_GUIDE.md](./DATABASE_MIGRATION_GUIDE.md)** - Database setup and migration guide
+- **[TESTING_GUIDE.md](./TESTING_GUIDE.md)** - How to test the video analysis functionality
+- **[MOCK_BACKEND_GUIDE.md](./MOCK_BACKEND_GUIDE.md)** - Create a mock backend for testing
+- **[BACKEND_API_SPEC.md](./BACKEND_API_SPEC.md)** - Backend API specification
+- **[BACKEND_INTEGRATION_GUIDE.md](./BACKEND_INTEGRATION_GUIDE.md)** - Connect your AI backend
 - **[DEPLOYMENT.md](./DEPLOYMENT.md)** - Complete deployment guide
 - **[DEPLOYMENT_CHECKLIST.md](./DEPLOYMENT_CHECKLIST.md)** - Pre-deployment checklist
 - **[ENV_VARIABLES_REFERENCE.md](./ENV_VARIABLES_REFERENCE.md)** - Detailed environment variables guide
@@ -265,15 +271,18 @@ For additional documentation, see:
 
 ### AI Backend API (External)
 
-The application expects an AI backend at `NEXT_PUBLIC_API_BASE_URL` with:
+The application integrates with an existing backend at `https://api.prodartscoach.com`:
 
-- `POST /analyze?model={model}` - Process video analysis
-  - Accepts `side_video` and/or `front_video` files
-  - Accepts `user_id` and `job_id` parameters
-  - Should update job status in Supabase `jobs` table
-  - Returns analysis results
+- `POST /upload` - Upload video(s)
+- `POST /analyze` - Start analysis
+- `GET /status/{job_id}` - Poll job progress
+- `GET /results/{job_id}/{resource}` - Fetch result files (overlays, PDFs, etc.)
 
-See `lib/api/client.ts` for API client configuration.
+**Configuration:**
+- Set `AI_BACKEND_URL=https://api.prodartscoach.com` in `.env.local`
+- Set `NEXT_PUBLIC_API_BASE_URL=https://api.prodartscoach.com` for result URLs
+
+See [BACKEND_API_SPEC.md](./BACKEND_API_SPEC.md) for detailed API specification.
 
 ## 🐛 Troubleshooting
 

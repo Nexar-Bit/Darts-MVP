@@ -56,11 +56,17 @@ NEXT_PUBLIC_STRIPE_MONTHLY_PRICE_ID=price_your_monthly_price_id_here
 STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret_here
 ```
 
-### AI Backend Configuration (Optional)
+### AI Backend Configuration
 
 ```env
 # AI Backend URL (server-side only)
-AI_BACKEND_URL=http://localhost:8000
+# Production: https://api.prodartscoach.com
+# Local: http://localhost:8000 (if running backend locally)
+AI_BACKEND_URL=https://api.prodartscoach.com
+
+# Frontend API Base URL (for constructing result URLs)
+# Should match AI_BACKEND_URL
+NEXT_PUBLIC_API_BASE_URL=https://api.prodartscoach.com
 
 # AI Backend API Key (if required)
 AI_BACKEND_API_KEY=your_backend_api_key_if_required
@@ -78,9 +84,9 @@ AI_BACKEND_API_KEY=your_backend_api_key_if_required
 ### NEXT_PUBLIC_API_BASE_URL
 - **Type**: Public (exposed to browser)
 - **Description**: Base URL for AI backend API (frontend calls)
-- **Development**: `http://localhost:8000`
-- **Production**: `https://your-ai-backend.com`
-- **Used for**: Building video URLs, PDF download links
+- **Development**: `http://localhost:8000` (if running backend locally)
+- **Production**: `https://api.prodartscoach.com`
+- **Used for**: Building video URLs, PDF download links (e.g., `/results/{job_id}/overlay.mp4`)
 
 ### NEXT_PUBLIC_SUPABASE_URL
 - **Type**: Public (exposed to browser)
