@@ -148,6 +148,26 @@ export default function UploadArea({ onAnalysisStart, disabled = false }: Upload
 
     if (isProcessing) return;
 
+    // Check total file size before upload
+    // Vercel serverless functions have a 4.5MB body size limit
+    // We'll warn if total exceeds 100MB (conservative estimate)
+    const totalSize = (sideFile?.size || 0) + (frontFile?.size || 0);
+    const warningSize = 100 * 1024 * 1024; // 100MB
+    
+    if (totalSize > warningSize) {
+      const totalSizeMB = (totalSize / (1024 * 1024)).toFixed(1);
+      const shouldContinue = window.confirm(
+        `Warning: Your total upload size is ${totalSizeMB}MB. ` +
+        `Large files may fail to upload due to server limits. ` +
+        `Consider compressing your videos or uploading them separately. ` +
+        `\n\nDo you want to continue?`
+      );
+      
+      if (!shouldContinue) {
+        return;
+      }
+    }
+
     try {
       clearError();
       await uploadVideos(sideFile, frontFile);
@@ -162,6 +182,17 @@ export default function UploadArea({ onAnalysisStart, disabled = false }: Upload
       console.error('Upload error:', error);
       const userMessage = getUserErrorMessage(error);
       const errorInfo = formatError(error);
+      
+      // Special handling for 413 errors
+      if (errorInfo.statusCode === 413 || error?.status === 413 || error?.message?.includes('413')) {
+        toast.error(
+          'File size too large. The server cannot process files this large. ' +
+          'Please try compressing your videos or uploading smaller files. ' +
+          'Maximum recommended size per video: 100MB.',
+          12000
+        );
+        return;
+      }
       
       // Show error toast with retry option if retryable
       if (errorInfo.retryable) {

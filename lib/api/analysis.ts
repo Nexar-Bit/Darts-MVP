@@ -148,6 +148,18 @@ export async function uploadVideo(
       // Don't set Content-Type header - browser will set it with boundary
     });
 
+    // Handle 413 Payload Too Large errors specifically
+    if (!response.ok && response.status === 413) {
+      const errorData = await response.json().catch(() => ({ 
+        error: 'File size too large. The server cannot process files this large.' 
+      }));
+      throw new ApiError(
+        errorData.error || 'File size too large. Please try smaller files or compress your videos.',
+        413,
+        errorData
+      );
+    }
+
     const data = await response.json();
     
     if (!data.job_id) {

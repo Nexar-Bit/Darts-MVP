@@ -60,6 +60,8 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
   } = useAnalysis();
 
   useEffect(() => {
+    let isMounted = true;
+    
     // Check for session_id in URL (from Stripe checkout redirect)
     const checkSessionId = async () => {
       const params = new URLSearchParams(window.location.search);
@@ -73,7 +75,7 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
           const supabase = createSupabaseClient();
           const { data: { session } } = await supabase.auth.getSession();
           
-          if (!session?.access_token) return;
+          if (!session?.access_token || !isMounted) return;
 
           const response = await fetch('/api/verify-session', {
             method: 'POST',
@@ -84,20 +86,28 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
             body: JSON.stringify({ sessionId }),
           });
 
+          if (!isMounted) return;
+
           const data = await response.json();
           
-          if (data.success && data.updated) {
+          if (data.success && data.updated && isMounted) {
             toast.success(`Successfully activated ${data.planType === 'starter' ? 'Starter' : 'Monthly'} Plan!`);
             if (data.profile) {
               setProfile(data.profile);
             } else {
               const { profile: updatedProfile } = await getCurrentUserProfile();
-              if (updatedProfile) setProfile(updatedProfile);
+              if (updatedProfile && isMounted) setProfile(updatedProfile);
             }
           }
-        } catch (err) {
-          console.error('Error verifying session:', err);
-          toast.error('Failed to verify payment. Please refresh the page.');
+        } catch (err: any) {
+          // Ignore AbortError - it's expected when component unmounts
+          if (err?.name === 'AbortError' || err?.message?.includes('aborted')) {
+            return;
+          }
+          if (isMounted) {
+            console.error('Error verifying session:', err);
+            toast.error('Failed to verify payment. Please refresh the page.');
+          }
         }
       }
     };
@@ -105,11 +115,16 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
     const refreshProfile = async () => {
       try {
         const { profile: updatedProfile } = await getCurrentUserProfile();
-        if (updatedProfile) {
+        if (updatedProfile && isMounted) {
           setProfile(updatedProfile);
         }
-      } catch (err) {
-        console.warn('Error refreshing profile:', err);
+      } catch (err: any) {
+        // Ignore AbortError - it's expected when component unmounts or React Strict Mode
+        if (err?.name !== 'AbortError' && !err?.message?.includes('aborted')) {
+          if (isMounted) {
+            console.warn('Error refreshing profile:', err);
+          }
+        }
       }
     };
 
@@ -121,6 +136,11 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
     } else {
       refreshProfile();
     }
+
+    // Cleanup function to prevent state updates after unmount
+    return () => {
+      isMounted = false;
+    };
   }, [toast]);
 
   const handleSignOut = useCallback(async () => {

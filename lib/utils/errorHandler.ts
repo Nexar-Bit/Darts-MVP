@@ -58,6 +58,17 @@ export function formatError(error: unknown): ErrorInfo {
 
     // Client errors (400-499)
     if (status >= 400) {
+      // Special handling for 413 Payload Too Large
+      if (status === 413) {
+        return {
+          message: error.message,
+          userMessage: 'File size too large. The total upload size exceeds the server limit. Please try uploading smaller files or compress your videos. Maximum recommended size per video: 100MB.',
+          retryable: false,
+          statusCode: status,
+          category: 'validation',
+        };
+      }
+      
       return {
         message: error.message,
         userMessage: error.message || 'Invalid request. Please check your input and try again.',

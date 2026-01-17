@@ -92,9 +92,12 @@ function AnalyzePageContent() {
     setListLoading(true);
     try {
       const jobsList = await getUserJobs(user.id, 100);
-      setJobs(jobsList);
+      console.log('Loaded jobs:', jobsList?.length || 0, jobsList);
+      setJobs(jobsList || []);
     } catch (e: any) {
+      console.error('Error loading jobs:', e);
       setListErr(e?.message || 'Failed to load jobs');
+      setJobs([]);
     } finally {
       setListLoading(false);
     }
@@ -169,8 +172,13 @@ function AnalyzePageContent() {
       setSideFile(null);
       setFrontFile(null);
 
+      // Refresh jobs list before navigating
       await loadJobs();
-      openDetail(result.job_id);
+      
+      // Small delay to ensure state updates
+      setTimeout(() => {
+        openDetail(result.job_id);
+      }, 100);
     } catch (e: any) {
       console.error('Upload error:', e);
       toast.error(e?.message || 'Upload failed.');

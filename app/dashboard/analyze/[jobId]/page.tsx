@@ -73,18 +73,27 @@ export default function JobDetailPage() {
     
     try {
       const jobsList = await getUserJobs(user.id, 100);
-      setJobs(jobsList);
+      console.log('Detail page - Loaded jobs:', jobsList?.length || 0, jobsList);
+      setJobs(jobsList || []);
     } catch (e: any) {
       console.error('Error loading jobs:', e);
+      setJobs([]);
     }
   }
 
   async function loadJobStatus(jobId: string) {
     if (!user) return null;
     
-    const status = await getJobStatus(jobId);
-    setDetail(status);
-    return status;
+    try {
+      const status = await getJobStatus(jobId);
+      console.log('Job status loaded:', jobId, status);
+      setDetail(status);
+      return status;
+    } catch (error: any) {
+      console.error('Error loading job status:', error);
+      setDetailErr(error?.message || 'Failed to load job status');
+      return null;
+    }
   }
 
   useEffect(() => {
@@ -293,6 +302,20 @@ export default function JobDetailPage() {
                 />
               </div>
             </div>
+          ) : detail?.status === 'failed' ? (
+            <Card className="border-red-200 bg-red-50">
+              <CardContent className="pt-6">
+                <div className="text-center">
+                  <p className="text-lg font-semibold text-red-900 mb-2">Analysis Failed</p>
+                  <p className="text-sm text-red-700 mb-4">
+                    {detail?.error?.message || 'The analysis could not be completed. Please try again.'}
+                  </p>
+                  <Button variant="primary" onClick={startNewAnalysis}>
+                    Start New Analysis
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
           ) : null}
         </div>
       </DashboardLayout>

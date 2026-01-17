@@ -122,8 +122,17 @@ export async function getUserProfile(userId: string): Promise<{
       profile: data as UserProfile | null,
       error: null,
     };
-  } catch (error) {
-    // Handle any unexpected errors gracefully
+  } catch (error: any) {
+    // Handle AbortError gracefully (common in React Strict Mode or component unmounts)
+    if (error?.name === 'AbortError' || error?.message?.includes('aborted')) {
+      // Silently ignore abort errors - they're expected when components unmount
+      return {
+        profile: null,
+        error: null,
+      };
+    }
+    
+    // Handle any other unexpected errors gracefully
     console.error('Error fetching user profile:', error);
     return {
       profile: null,

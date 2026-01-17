@@ -129,7 +129,11 @@ export default function UploadCard({ label, hint, file, setFile, busy, validate 
         onChange={async (e) => {
           const files = e.target.files;
           await acceptFiles(files);
-          e.currentTarget.value = '';
+          // Reset input value to allow selecting the same file again
+          // Use the ref to ensure we have a valid reference
+          if (inputRef.current) {
+            inputRef.current.value = '';
+          }
         }}
       />
 

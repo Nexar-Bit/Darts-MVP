@@ -3,6 +3,8 @@ import { createSupabaseServerClientWithAuth, createSupabaseServerClient } from '
 import { incrementAnalysisCount } from '@/lib/supabase/databaseServer';
 
 export const runtime = 'nodejs';
+// Increase body size limit for large video uploads
+export const maxDuration = 300; // 5 minutes
 
 /**
  * API Route: /api/analyze
@@ -18,6 +20,9 @@ export const runtime = 'nodejs';
  * - Valid authentication token
  * - Active paid subscription
  * - Available analysis quota
+ * 
+ * Note: Vercel serverless functions have a 4.5MB body size limit by default.
+ * For larger files, consider using direct upload to backend or Vercel Pro/Enterprise.
  */
 export async function POST(request: NextRequest) {
   try {
