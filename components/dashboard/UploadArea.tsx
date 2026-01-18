@@ -47,8 +47,9 @@ export default function UploadArea({ onAnalysisStart, disabled = false }: Upload
   const sideInputRef = useRef<HTMLInputElement>(null);
   const frontInputRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
+  const uploadInProgressRef = useRef<boolean>(false);
 
-  const isProcessing = isUploading || isAnalyzing;
+  const isProcessing = isUploading || isAnalyzing || uploadInProgressRef.current;
   const canUpload = !disabled && !isProcessing && (sideFile || frontFile);
 
   const handleFileSelect = async (
@@ -141,12 +142,19 @@ export default function UploadArea({ onAnalysisStart, disabled = false }: Upload
   const handleStartAnalysis = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    // Prevent multiple simultaneous uploads using ref (more reliable than state)
+    if (uploadInProgressRef.current || isProcessing) {
+      console.warn('[UploadArea] Upload already in progress, ignoring duplicate request');
+      return;
+    }
+    
     if (!sideFile && !frontFile) {
       setErrors({ side: 'Please select at least one video file' });
       return;
     }
-
-    if (isProcessing) return;
+    
+    // Mark upload as in progress
+    uploadInProgressRef.current = true;
 
     // Check total file size before upload
     // Vercel serverless functions have a 4.5MB body size limit
@@ -179,11 +187,11 @@ export default function UploadArea({ onAnalysisStart, disabled = false }: Upload
       setSideFile(null);
       setFrontFile(null);
     } catch (error: any) {
-      console.error('Upload error:', error);
+      console.error('[UploadArea] Upload error:', error);
       const userMessage = getUserErrorMessage(error);
       const errorInfo = formatError(error);
       
-      // Special handling for 413 errors
+      // Special handling for 413 errors - do NOT retry these
       if (errorInfo.statusCode === 413 || error?.status === 413 || error?.message?.includes('413')) {
         toast.error(
           'File size too large. The server cannot process files this large. ' +
@@ -191,22 +199,35 @@ export default function UploadArea({ onAnalysisStart, disabled = false }: Upload
           'Maximum recommended size per video: 100MB.',
           12000
         );
+        // Clear files to prevent accidental retry
+        setSideFile(null);
+        setFrontFile(null);
+        uploadInProgressRef.current = false;
         return;
       }
       
-      // Show error toast with retry option if retryable
-      if (errorInfo.retryable) {
+      // Show error toast with retry option if retryable (but NOT for 413)
+      // Only show retry for network/server errors, not client errors
+      if (errorInfo.retryable && errorInfo.category !== 'validation') {
         toast.errorWithAction(
           userMessage,
           {
             label: 'Retry',
-            onClick: () => handleStartAnalysis(e),
+            onClick: () => {
+              // Only retry if not processing and files still exist
+              if (!uploadInProgressRef.current && !isProcessing && (sideFile || frontFile)) {
+                handleStartAnalysis(e);
+              }
+            },
           },
           10000
         );
       } else {
         toast.error(userMessage, 8000);
       }
+    } finally {
+      // Always reset the upload in progress flag
+      uploadInProgressRef.current = false;
     }
   };
 
@@ -417,6 +438,20 @@ export default function UploadArea({ onAnalysisStart, disabled = false }: Upload
             <ErrorDisplay
               error={result.error}
               onRetry={() => {
+                // Don't retry if already processing or if error is 413 (file too large)
+                if (isProcessing) {
+                  console.warn('Already processing, ignoring retry');
+                  return;
+                }
+                
+                // Check if error is 413 - don't retry these
+                const errorStr = String(result.error).toLowerCase();
+                if (errorStr.includes('413') || errorStr.includes('too large') || errorStr.includes('payload too large')) {
+                  console.warn('413 error detected, not retrying');
+                  clearError();
+                  return;
+                }
+                
                 clearError();
                 if (sideFile || frontFile) {
                   handleStartAnalysis({ preventDefault: () => {} } as React.FormEvent);

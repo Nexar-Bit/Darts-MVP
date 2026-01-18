@@ -9,9 +9,11 @@ export const maxDuration = 300; // 5 minutes for large uploads
  * Test endpoint to verify route is accessible
  */
 export async function GET(request: NextRequest) {
+  console.log('[proxy-upload] GET request received');
   return NextResponse.json({ 
     message: 'Proxy upload endpoint is working',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    path: '/api/analyze/proxy-upload'
   });
 }
 
