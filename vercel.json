@@ -13,15 +13,6 @@
     },
     "app/api/analyze/route.ts": {
       "maxDuration": 300
-    },
-    "app/api/proxy/analyze/route.ts": {
-      "maxDuration": 300
-    },
-    "app/api/proxy/jobs/[jobId]/route.ts": {
-      "maxDuration": 10
-    },
-    "app/api/analyze/proxy-upload/route.ts": {
-      "maxDuration": 600
     }
   },
   "headers": [
