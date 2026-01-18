@@ -63,9 +63,20 @@ export function formatError(error: unknown): ErrorInfo {
         return {
           message: error.message,
           userMessage: 'File size too large. The total upload size exceeds the server limit. Please try uploading smaller files or compress your videos. Maximum recommended size per video: 100MB.',
-          retryable: false,
+          retryable: false, // Never retry 413 errors
           statusCode: status,
           category: 'validation',
+        };
+      }
+      
+      // Special handling for CORS errors (status 0)
+      if (status === 0 || error.message?.includes('CORS') || error.message?.includes('cors')) {
+        return {
+          message: error.message,
+          userMessage: 'CORS error: The backend is not configured to accept requests from this origin. Please configure CORS on your backend or contact support.',
+          retryable: false, // Don't retry CORS errors
+          statusCode: 0,
+          category: 'network',
         };
       }
       

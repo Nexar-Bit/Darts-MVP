@@ -156,21 +156,25 @@ export async function uploadVideo(
       throw new ApiError('No job_id returned from server', 500, jobData);
     }
 
-    // Step 2: Upload to backend
-    // Try direct upload first, fallback to proxy if CORS fails
+    // Step 2: Upload directly to backend (bypasses Vercel proxy to avoid 413 errors)
     const directUploadEndpoint = upload_endpoint || 
       (backend_url ? `${backend_url}/upload` : null) ||
       (process.env.NEXT_PUBLIC_AI_BACKEND_URL ? `${process.env.NEXT_PUBLIC_AI_BACKEND_URL}/upload` : null) ||
       (process.env.NEXT_PUBLIC_API_BASE_URL ? `${process.env.NEXT_PUBLIC_API_BASE_URL}/upload` : null);
+    
+    if (!directUploadEndpoint) {
+      throw new ApiError(
+        'Backend upload URL not configured. Please set AI_BACKEND_URL or NEXT_PUBLIC_API_BASE_URL.',
+        500
+      );
+    }
     
     const finalAnalyzeEndpoint = analyze_endpoint ||
       (backend_url ? `${backend_url}/analyze` : null) ||
       (process.env.NEXT_PUBLIC_AI_BACKEND_URL ? `${process.env.NEXT_PUBLIC_AI_BACKEND_URL}/analyze` : null) ||
       (process.env.NEXT_PUBLIC_API_BASE_URL ? `${process.env.NEXT_PUBLIC_API_BASE_URL}/analyze` : null);
 
-    // Use proxy endpoint to avoid CORS issues (streams data, no size limit)
-    const proxyUploadEndpoint = `/api/analyze/proxy-upload?job_id=${encodeURIComponent(job_id)}`;
-
+    // Prepare form data for direct upload
     const uploadFormData = new FormData();
     
     if (sideVideo) {
@@ -185,17 +189,57 @@ export async function uploadVideo(
     uploadFormData.append('job_id', job_id);
     uploadFormData.append('model', model);
 
-    // Use proxy endpoint (handles CORS and streams data)
-    const uploadResponse = await authenticatedFetch(proxyUploadEndpoint, {
+    // Upload directly to backend (bypasses Vercel, no size limits)
+    // Note: Backend must have CORS configured - see BACKEND_CORS_SETUP.md
+    console.log(`[uploadVideo] Uploading directly to ${directUploadEndpoint} for job ${job_id}`);
+    
+    const uploadResponse = await fetch(directUploadEndpoint, {
       method: 'POST',
+      headers: {
+        'X-User-ID': user_id || userId || '',
+        ...(process.env.NEXT_PUBLIC_AI_BACKEND_API_KEY && {
+          'X-API-Key': process.env.NEXT_PUBLIC_AI_BACKEND_API_KEY,
+        }),
+        ...(token && {
+          'Authorization': `Bearer ${token}`,
+        }),
+        // Don't set Content-Type - browser will set it with boundary automatically
+      },
       body: uploadFormData,
-      // Don't set Content-Type header - browser will set it with boundary
+      // No timeout - browser handles it, backend should return 202 Accepted quickly
     });
 
-    if (!uploadResponse.ok) {
+    // Handle different response codes
+    if (uploadResponse.status === 202) {
+      // Backend accepted upload, processing in background (ideal)
+      const responseData = await uploadResponse.json().catch(() => ({}));
+      console.log(`[uploadVideo] Upload accepted (202) for job ${job_id}`, responseData);
+      // Continue to start analysis step
+    } else if (!uploadResponse.ok) {
+      // Handle errors
       const errorData = await uploadResponse.json().catch(() => ({ 
         error: `HTTP ${uploadResponse.status}: ${uploadResponse.statusText}` 
       }));
+      
+      // Special handling for CORS errors
+      if (uploadResponse.status === 0 || uploadResponse.statusText === '') {
+        throw new ApiError(
+          'CORS error: Backend is not configured to accept requests from this origin. ' +
+          'Please configure CORS on your backend (see BACKEND_CORS_SETUP.md) or contact support.',
+          0,
+          { ...errorData, corsError: true }
+        );
+      }
+      
+      // Special handling for 413 errors (shouldn't happen with direct upload, but handle it)
+      if (uploadResponse.status === 413) {
+        throw new ApiError(
+          'File size too large. Please compress your videos or upload smaller files. Maximum recommended: 100MB per video.',
+          413,
+          { ...errorData, fileTooLarge: true }
+        );
+      }
+      
       throw new ApiError(
         errorData.error || 'Failed to upload videos to backend',
         uploadResponse.status,

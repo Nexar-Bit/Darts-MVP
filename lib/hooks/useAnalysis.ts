@@ -29,6 +29,7 @@ export interface AnalysisResult {
   result?: any;
   error?: string;
   createdAt: number;
+  nonRetryable?: boolean; // Set to true for errors that should not be retried (413, CORS, etc.)
 }
 
 /**
@@ -273,19 +274,24 @@ export function useAnalysis(): UseAnalysisReturn {
       const userMessage = getUserErrorMessage(error);
       setProgressMessage(`Analysis failed: ${userMessage}` as ProgressMessage);
       
-      // Check if it's a 413 error - these should not be retried
+      // Check if it's a 413 error or CORS error - these should not be retried
       const is413Error = error?.status === 413 || 
                         error?.message?.includes('413') || 
                         error?.message?.toLowerCase().includes('payload too large') ||
                         error?.message?.toLowerCase().includes('too large');
+      
+      const isCorsError = error?.status === 0 || 
+                         error?.message?.includes('CORS') || 
+                         error?.message?.includes('cors') ||
+                         error?.corsError === true;
       
       setResult({
         jobId: '',
         status: 'failed',
         error: userMessage,
         createdAt: Date.now(),
-        // Mark 413 errors as non-retryable
-        ...(is413Error && { nonRetryable: true }),
+        // Mark 413 and CORS errors as non-retryable
+        ...((is413Error || isCorsError) && { nonRetryable: true }),
       });
       
       throw error;

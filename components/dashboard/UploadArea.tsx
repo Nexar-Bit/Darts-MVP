@@ -192,6 +192,7 @@ export default function UploadArea({ onAnalysisStart, disabled = false }: Upload
       const errorInfo = formatError(error);
       
       // Special handling for 413 errors - do NOT retry these
+      // These should not happen with direct uploads, but handle gracefully
       if (errorInfo.statusCode === 413 || error?.status === 413 || error?.message?.includes('413')) {
         toast.error(
           'File size too large. The server cannot process files this large. ' +
@@ -200,6 +201,19 @@ export default function UploadArea({ onAnalysisStart, disabled = false }: Upload
           12000
         );
         // Clear files to prevent accidental retry
+        setSideFile(null);
+        setFrontFile(null);
+        uploadInProgressRef.current = false;
+        return;
+      }
+      
+      // Special handling for CORS errors
+      if (errorInfo.statusCode === 0 || error?.corsError || error?.message?.includes('CORS')) {
+        toast.error(
+          'CORS error: The backend is not configured to accept uploads from this origin. ' +
+          'Please configure CORS on your backend (see BACKEND_CORS_SETUP.md) or contact support.',
+          15000
+        );
         setSideFile(null);
         setFrontFile(null);
         uploadInProgressRef.current = false;
@@ -438,16 +452,22 @@ export default function UploadArea({ onAnalysisStart, disabled = false }: Upload
             <ErrorDisplay
               error={result.error}
               onRetry={() => {
-                // Don't retry if already processing or if error is 413 (file too large)
-                if (isProcessing) {
-                  console.warn('Already processing, ignoring retry');
+                // Don't retry if already processing
+                if (isProcessing || uploadInProgressRef.current) {
+                  console.warn('[UploadArea] Already processing, ignoring retry');
                   return;
                 }
                 
-                // Check if error is 413 - don't retry these
+                // Check if error is 413 or CORS - don't retry these
                 const errorStr = String(result.error).toLowerCase();
-                if (errorStr.includes('413') || errorStr.includes('too large') || errorStr.includes('payload too large')) {
-                  console.warn('413 error detected, not retrying');
+                if (
+                  errorStr.includes('413') || 
+                  errorStr.includes('too large') || 
+                  errorStr.includes('payload too large') ||
+                  errorStr.includes('cors') ||
+                  result.nonRetryable
+                ) {
+                  console.warn('[UploadArea] Non-retryable error detected, not retrying');
                   clearError();
                   return;
                 }
