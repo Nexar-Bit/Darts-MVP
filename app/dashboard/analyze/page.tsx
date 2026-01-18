@@ -86,7 +86,10 @@ function AnalyzePageContent() {
   };
 
   async function loadJobs() {
-    if (!user) return;
+    if (!user) {
+      toast.error('Please wait for user data to load', 3000);
+      return;
+    }
     
     setListErr('');
     setListLoading(true);
@@ -94,10 +97,17 @@ function AnalyzePageContent() {
       const jobsList = await getUserJobs(user.id, 100);
       console.log('Loaded jobs:', jobsList?.length || 0, jobsList);
       setJobs(jobsList || []);
+      if (jobsList && jobsList.length > 0) {
+        toast.success(`Refreshed: ${jobsList.length} ${jobsList.length === 1 ? 'analysis' : 'analyses'} found`, 2000);
+      } else {
+        toast.info('No analyses found', 2000);
+      }
     } catch (e: any) {
       console.error('Error loading jobs:', e);
-      setListErr(e?.message || 'Failed to load jobs');
+      const errorMessage = e?.message || 'Failed to load jobs';
+      setListErr(errorMessage);
       setJobs([]);
+      toast.error(errorMessage, 5000);
     } finally {
       setListLoading(false);
     }

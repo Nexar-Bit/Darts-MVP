@@ -124,49 +124,113 @@ export async function uploadVideo(
     );
   }
 
-  // Create FormData for multipart/form-data upload
-  const formData = new FormData();
-  
-  if (sideVideo) {
-    formData.append('side_video', sideVideo);
-  }
-  
-  if (frontVideo) {
-    formData.append('front_video', frontVideo);
-  }
-  
-  formData.append('model', model);
-  
-  if (userId) {
-    formData.append('user_id', userId);
-  }
-
   try {
-    const response = await authenticatedFetch('/api/analyze', {
+    // Step 1: Create job via lightweight API endpoint (no file upload)
+    const token = await getAuthToken();
+    const createJobResponse = await fetch('/api/analyze/create-job', {
       method: 'POST',
-      body: formData,
-      // Don't set Content-Type header - browser will set it with boundary
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        filename: sideVideo?.name || frontVideo?.name || 'unknown',
+      }),
     });
 
-    // Handle 413 Payload Too Large errors specifically
-    if (!response.ok && response.status === 413) {
-      const errorData = await response.json().catch(() => ({ 
-        error: 'File size too large. The server cannot process files this large.' 
+    if (!createJobResponse.ok) {
+      const errorData = await createJobResponse.json().catch(() => ({ 
+        error: `HTTP ${createJobResponse.status}: ${createJobResponse.statusText}` 
       }));
       throw new ApiError(
-        errorData.error || 'File size too large. Please try smaller files or compress your videos.',
-        413,
+        errorData.error || 'Failed to create job',
+        createJobResponse.status,
         errorData
       );
     }
 
-    const data = await response.json();
-    
-    if (!data.job_id) {
-      throw new ApiError('No job_id returned from server', 500, data);
+    const jobData = await createJobResponse.json();
+    const { job_id, user_id, upload_endpoint, analyze_endpoint, backend_url } = jobData;
+
+    if (!job_id) {
+      throw new ApiError('No job_id returned from server', 500, jobData);
     }
 
-    return { job_id: data.job_id };
+    // Step 2: Upload to backend
+    // Try direct upload first, fallback to proxy if CORS fails
+    const directUploadEndpoint = upload_endpoint || 
+      (backend_url ? `${backend_url}/upload` : null) ||
+      (process.env.NEXT_PUBLIC_AI_BACKEND_URL ? `${process.env.NEXT_PUBLIC_AI_BACKEND_URL}/upload` : null) ||
+      (process.env.NEXT_PUBLIC_API_BASE_URL ? `${process.env.NEXT_PUBLIC_API_BASE_URL}/upload` : null);
+    
+    const finalAnalyzeEndpoint = analyze_endpoint ||
+      (backend_url ? `${backend_url}/analyze` : null) ||
+      (process.env.NEXT_PUBLIC_AI_BACKEND_URL ? `${process.env.NEXT_PUBLIC_AI_BACKEND_URL}/analyze` : null) ||
+      (process.env.NEXT_PUBLIC_API_BASE_URL ? `${process.env.NEXT_PUBLIC_API_BASE_URL}/analyze` : null);
+
+    // Use proxy endpoint to avoid CORS issues (streams data, no size limit)
+    const proxyUploadEndpoint = `/api/analyze/proxy-upload?job_id=${encodeURIComponent(job_id)}`;
+
+    const uploadFormData = new FormData();
+    
+    if (sideVideo) {
+      uploadFormData.append('side_video', sideVideo);
+    }
+    
+    if (frontVideo) {
+      uploadFormData.append('front_video', frontVideo);
+    }
+    
+    uploadFormData.append('user_id', user_id || userId || '');
+    uploadFormData.append('job_id', job_id);
+    uploadFormData.append('model', model);
+
+    // Use proxy endpoint (handles CORS and streams data)
+    const uploadResponse = await authenticatedFetch(proxyUploadEndpoint, {
+      method: 'POST',
+      body: uploadFormData,
+      // Don't set Content-Type header - browser will set it with boundary
+    });
+
+    if (!uploadResponse.ok) {
+      const errorData = await uploadResponse.json().catch(() => ({ 
+        error: `HTTP ${uploadResponse.status}: ${uploadResponse.statusText}` 
+      }));
+      throw new ApiError(
+        errorData.error || 'Failed to upload videos to backend',
+        uploadResponse.status,
+        errorData
+      );
+    }
+
+    // Step 3: Start analysis on backend
+    if (finalAnalyzeEndpoint) {
+      const analyzeHeaders: HeadersInit = {
+        'Content-Type': 'application/json',
+        'X-User-ID': user_id || userId || '',
+      };
+      
+      if (token) {
+        analyzeHeaders['Authorization'] = `Bearer ${token}`;
+      }
+
+      const analyzeResponse = await fetch(finalAnalyzeEndpoint, {
+        method: 'POST',
+        headers: analyzeHeaders,
+        body: JSON.stringify({
+          job_id,
+          user_id: user_id || userId || '',
+          model,
+        }),
+      });
+
+      if (!analyzeResponse.ok) {
+        console.warn('Analysis start failed, but upload succeeded. Job may need manual start.');
+        // Don't throw - upload succeeded, analysis might start automatically
+      }
+    }
+
+    return { job_id };
   } catch (error) {
     if (error instanceof ApiError) {
       throw error;

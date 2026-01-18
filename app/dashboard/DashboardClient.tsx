@@ -394,7 +394,16 @@ export default function DashboardClient({ initialUser, initialProfile }: Dashboa
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={refreshHistory}
+                    onClick={async () => {
+                      try {
+                        const jobs = await refreshHistory();
+                        toast.success(`Refreshed ${jobs?.length || 0} analyses`, 2000);
+                      } catch (error: any) {
+                        console.error('Failed to refresh history:', error);
+                        const errorMessage = error?.message || 'Failed to refresh history';
+                        toast.error(errorMessage, 5000);
+                      }
+                    }}
                     disabled={loading}
                   >
                     <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />

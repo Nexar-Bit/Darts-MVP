@@ -46,7 +46,7 @@ export interface UseAnalysisReturn {
   uploadVideos: (sideVideo?: File | null, frontVideo?: File | null) => Promise<void>;
   startPolling: (jobId: string) => void;
   stopPolling: () => void;
-  refreshHistory: () => Promise<void>;
+  refreshHistory: () => Promise<JobListItem[]>;
   clearResult: () => void;
   clearError: () => void;
   
@@ -302,10 +302,12 @@ export function useAnalysis(): UseAnalysisReturn {
         }
       );
       setHistory(jobs);
+      // Return success so callers can show feedback
+      return jobs;
     } catch (error) {
       console.error('Failed to refresh history:', error);
-      // Don't throw - history refresh failure shouldn't break the app
-      // But we could show a toast notification here if needed
+      // Re-throw so callers can handle the error and show feedback
+      throw error;
     }
   }, []);
 
