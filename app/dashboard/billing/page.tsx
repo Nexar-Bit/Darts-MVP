@@ -167,7 +167,7 @@ export default function BillingPage() {
                     setLoading(true);
                     loadUserData();
                   }}
-                  disabled={loading}
+                  disabled={loading}       
                 >
                   {loading ? 'Refreshing...' : 'Refresh'}
                 </Button>
